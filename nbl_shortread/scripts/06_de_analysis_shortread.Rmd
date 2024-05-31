@@ -1,0 +1,793 @@
+---
+title: "DE_analysis_shortread"
+output: html_document
+author: "MG"
+date: "2024-04-09"
+---
+
+# Setup
+```{r setup}
+sr_workdir = "/hpc/pmc_vanheesch/projects/mvangijzen/nbl_shortread"
+sr_basedir = paste0(sr_workdir, "/analysis/customannotation")
+sr_countsdir = paste0(sr_workdir, "/analysis/salmon_quant")
+sr_savedir = paste0(sr_workdir, "/results/de_analysis")
+```
+
+# Libraries
+```{r libraries}
+library(DESeq2)
+library(GenomicFeatures)
+library(ggplot2)
+library(EnhancedVolcano)
+library(dplyr)
+library(ggbeeswarm)
+library(ComplexHeatmap)
+
+# which ones are actually necessary?
+library(rtracklayer)
+library(magrittr)
+library(RColorBrewer)
+library(viridis)
+library(ggpubr)
+library(tidyverse)
+```
+
+# Loading salmon counts
+
+## Importing count files from salmon with tximport
+This step only needs to be done once!
+```{r create txdb}
+# create txdb from custom transcriptome
+nbl_shortread_gtf <- paste0(basedir,"/nbl_shortread_transcriptome_novel_filtered_new_new_len3.gtf")
+sr_txdb_filename <- paste0(basedir,"/nbl_shortread.gtf_TxDb")
+nbl_shortread_txdb <- GenomicFeatures::makeTxDbFromGFF(nbl_shortread_gtf)
+
+# use saveDb to easily retrieve the txdb for later use
+saveDb(nbl_shortread_txdb, sr_txdb_filename)
+```
+
+After the first time, the TxDb can just be loaded in
+```{r make txi}
+# make tx2gene from nbl shortread TxDb
+nbl_shortread_txdb=paste0(basedir,"/nbl_shortread.gtf_TxDb")
+txdb <- AnnotationDbi::loadDb(nbl_shortread_txdb)
+k <- keys(txdb, keytype = "TXNAME")
+tx2gene <- AnnotationDbi::select(txdb, k, "GENEID", "TXNAME")
+
+# list salmon count files
+count_files <- list.files(countsdir, recursive = T, pattern = "counts.tsv", full.names = T)
+names(count_files) <-  basename(gsub("_nbl_shortread_transcriptome.transcript_counts.tsv","",count_files))
+
+txi <- tximport::tximport(count_files, type = "salmon", tx2gene = tx2gene, countsFromAbundance = "scaledTPM")
+
+saveRDS(txi, file = paste0(countsdir, "/nbl_shortread_counts_full.RDS"))
+```
+
+--------
+## Make metadata sheet
+```{r create metadata sheet}
+sr_metadata <-  data.frame(sample_id = c("AS-524356-LR-53225",
+                                      "SVH02-50","SVH02-51","SVH02-52","SVH02-53","SVH02-54",
+                                      "SVH02-60","SVH02-61","SVH02-62","SVH02-63","SVH02-64"),
+                        condition = factor(c("untreated",
+                                           rep("entinostat",each=5),
+                                           rep("untreated",each=5))))
+rownames(sr_metadata) <- sr_metadata$sample_id
+```
+
+## Create DESeq2 dataset
+```{r create DESeq dataset}
+sr_txi <- readRDS(paste0(sr_workdir, "/analysis/salmon_quant/nbl_shortread_counts_full.RDS"))
+
+sr_ddsTxi <- DESeq2::DESeqDataSetFromTximport(sr_txi,
+                                   colData = sr_metadata,
+                                   design = ~ condition)
+
+# set untreated condition as the reference level
+sr_ddsTxi$condition <- relevel(sr_ddsTxi$condition, ref = "untreated")
+```
+
+# DDS analysis
+Now that the count data is transformed into the DESeq dataset format, the real fun can begin
+
+## Pre-filtering
+```{r set filtering parameters}
+sr_smallestGroupSize <- 5
+sr_keep <- rowSums(counts(sr_ddsTxi) > 0) >= sr_smallestGroupSize
+sr_dds_not0 <- sr_ddsTxi[sr_keep,]
+```
+
+## DESeq
+```{r perform deseq}
+sr_dds_not0 <- DESeq(sr_dds_not0)
+sr_res <- results(sr_dds_not0)
+sr_res
+```
+
+```{r summarizing results}
+sr_resOrdered <- sr_res[order(sr_res$pvalue),] #order by pvalue
+summary(sr_res)
+sum(sr_res$padj < 0.05, na.rm=TRUE)
+```
+
+out of 26924 with nonzero total read count
+adjusted p-value < 0.1
+LFC > 0 (up)       : 9693, 36%
+LFC < 0 (down)     : 6429, 24%
+outliers [1]       : 746, 2.8%
+low counts [2]     : 0, 0%
+(mean count < 0)
+[1] see 'cooksCutoff' argument of ?results
+[2] see 'independentFiltering' argument of ?results
+
+
+```{r}
+#shrinkage of effect size for visualization
+sr_resLFC <- lfcShrink(sr_dds_not0, coef="condition_entinostat_vs_untreated", 
+                    type="apeglm")
+sr_resLFC
+```
+
+## Exploritave plotting
+```{r plot}
+plotMA(sr_res, ylim=c(-5,5))
+```
+
+```{r plot}
+plotMA(sr_resLFC, ylim=c(-5,5))
+```
+
+```{r plot counts}
+# visualizing counts for the gene with the lowest adj p-value
+xloc_023532_counts <- as.data.frame(plotCounts(sr_dds_not0, gene="XLOC_023532", 
+                                               intgroup="condition", returnData = T))
+
+xloc_001249_counts <- as.data.frame(plotCounts(sr_dds_not0, gene="XLOC_001249", 
+                                               intgroup="condition", returnData = T))
+
+sr_mycn_counts <- as.data.frame(plotCounts(sr_dds_not0, gene="ENSG00000134323",
+                                           intgroup="condition", returnData = T))
+
+# plot with ggbeeswarm
+ ggplot(sr_mycn_counts, aes(condition, count)) +
+  geom_beeswarm(size = 2, cex = 0.8, alpha = 1) +
+  labs(x="Condition", y="Normalized counts", ylim = c(0,90000)) +
+  #scale_colour_manual(values = c("untreated"="#437ABE",
+                                 #"entinostat"="#932B2B")) +
+  theme_classic() +
+  scale_y_continuous(limits = c(0, 120000)) +
+  theme(legend.title = element_blank())
+  #scale_x_discrete(labels = c("untreated", "entinostat")) #+
+  # stat_summary(aes(group = 1, yend = after_stat(y), xend = after_stat(x+0.1)),
+  #               color = "black", fun = mean, geom = "segment",
+  #               position = "identity")
+ 
+ ggsave(filename = "beeswarm_sr_mycn_count.pdf", device = "pdf",
+       path = savedir, width = 8, height = 5)
+```
+
+```{r plot pca}
+# need to transform dds to vsd in order to perform pca
+sr_vsd <- vst(sr_dds_not0, blind = TRUE)
+
+sr_pca_data <- plotPCA(sr_vsd, intgroup="condition", returnData=T)
+sr_pct_var <- round(100 * attr(sr_pca_data, "percentVar"))
+
+ggplot(sr_pca_data, aes(PC1, PC2, color=condition)) +
+  geom_point(size=3) +
+  xlab(paste0("PC1: ",sr_pct_var[1],"% variance")) +
+  ylab(paste0("PC2: ",sr_pct_var[2],"% variance")) +
+  theme_classic() +
+  #geom_text(hjust=0.4, vjust=-1, size=2.7, show.legend = F) +
+  #geom_label(show.legend = FALSE) +
+  coord_fixed()
+```
+```{r save plot}
+ggsave(filename = "pca_shortread_neat.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+# Vulcano plot
+
+## EnhancedVolcano improved
+### Data prep
+```{r annotation}
+# convert resLFC DESeq object into dataframe
+sr_resLFC_df <- as.data.frame(sr_resLFC)
+sr_resLFC_df$gene_id <- row.names(sr_resLFC_df)
+
+# Add a column to indicate whether a gene is canonical based on the presence of "ENSG"
+sr_resLFC_df$canonical_status <- ifelse(grepl("^ENSG", sr_resLFC_df$gene_id), "Canonical", "Non-canonical")
+
+
+# get gene_types from gtf
+nbl_shortread_gtf <- paste0(sr_basedir,"/nbl_shortread_transcriptome_novel_filtered_new_new_len3.gtf")
+shortread_gtf_df <- as.data.frame(rtracklayer::import(nbl_shortread_gtf))
+
+sr_gene2type <- distinct(data.frame(shortread_gtf_df[, c("gene_id" ,"gene_biotype")]))
+rownames(sr_gene2type) <- sr_gene2type$gene_id
+
+#add gene_biotypes to resLFC_df
+for(r in 1:nrow(sr_resLFC_df)){
+  geneid <- sr_resLFC_df[r, "gene_id"]
+  sr_resLFC_df[r, "gene_type"] <- sr_gene2type[geneid,"gene_biotype"]
+}
+
+table(sr_resLFC_df$gene_type)
+
+# filter for interesting classes only
+sr_resLFC_df <- sr_resLFC_df[which(sr_resLFC_df$gene_type == "protein_coding" |
+                             sr_resLFC_df$gene_type == "lncRNA" |
+                             sr_resLFC_df$gene_type == "stringtie"),]
+
+sr_resLFC_df$gene_type[sr_resLFC_df$gene_type == "stringtie"] <- "novel"
+
+# Define colors from the "Set1" palette
+colors_set1 <- c("#4DB3B3", "#F2BF00", "#9973CC")
+
+# Assign colors to the gene types
+novel_gene_color <- colors_set1[1] # for novel genes
+protein_coding_gene_color <- colors_set1[2] # for canonical genes
+lncrna_gene_color <- colors_set1[3]
+
+# Update the keyvals dataframe to include the new category
+sr_keyvals <- data.frame(sr_resLFC_df) %>%
+  dplyr::select(c("gene_id", "gene_type", "padj"))
+
+# ifelse(keyvals$padj >= 0.05, not_sig_gene_color,
+
+# Assign colors to each category of genes
+sr_keyvals$color <- ifelse(sr_keyvals$gene_type == "novel", novel_gene_color,
+                   ifelse(sr_keyvals$gene_type == "protein_coding", protein_coding_gene_color,
+                   ifelse(sr_keyvals$gene_type == "lncRNA", lncrna_gene_color, NA)))
+
+# Subset keyvals where padj is 0.05 or higher
+#subset_keyvals <- keyvals[keyvals$padj >= 0.05, ]
+
+# Reassign color for the subset
+#subset_keyvals$color <- "lightgray"
+#keyvals[keyvals$padj >= 0.05, ]$color <- subset_keyvals$color
+
+# sanity check
+# table(keyvals$color)
+
+# Update the names for the legend
+sr_keyvals$name <- ifelse(sr_keyvals$gene_type == "novel", "Novel",
+                   ifelse(sr_keyvals$gene_type == "protein_coding", "Protein Coding",
+                   ifelse(sr_keyvals$gene_type == "lncRNA", "lncRNA", NA)))
+
+# Make named list from keyvals table (needed for volcano plot)
+sr_keyvals_list <- sr_keyvals$color
+names(sr_keyvals_list) <- sr_keyvals$name
+
+# Select top 10 downregulated genes (based on padj)
+sr_top10down <- sr_resLFC_df %>%
+   arrange(padj) %>%
+   subset(log2FoldChange < 0) %>%
+   subset(gene_type == "novel") %>%
+   head(10)
+
+# # Select top 10 upregulated genes (based on padj)
+sr_top10up <- sr_resLFC_df %>%
+   arrange(padj) %>%
+   subset(log2FoldChange > 0) %>%
+   subset(gene_type == "novel") %>%
+   head(10)
+ 
+# # Combine top 10 up and down genes
+sr_top <- rbind(sr_top10down, sr_top10up)
+# 
+# # Add a column to indicate whether a gene is part of the top 20
+sr_resLFC_df$is_top <- ifelse(sr_resLFC_df$gene_id %in% sr_top$gene_id, TRUE, FALSE)
+```
+
+### Plot
+```{r plot vulcano}
+EnhancedVolcano(sr_resLFC_df,
+    lab = ifelse(sr_resLFC_df$is_top == TRUE, as.character(sr_resLFC_df$gene_id), NA),
+    colCustom = sr_keyvals_list,
+    x = 'log2FoldChange',
+    y = 'padj',
+    title = NULL,
+    subtitle = 'Entinostat versus untreated',
+    pCutoff = 0.05,
+    FCcutoff = 1,
+    pointSize = 2.5,
+    labSize = 3,
+    #col=c('black', 'black', 'black', 'red3'),
+    colAlpha = 1,
+    legendPosition = 'top',
+    xlim = c(-12, 12), labFace = "bold", max.overlaps = 10, drawConnectors = T,  
+    lengthConnectors = unit(0, "mm"), axisLabSize = 15, legendLabSize = 10)
+
+#for saving:
+#ggsave(paste0(savedir, "/vulcano_gene_types_novelnames_sr.pdf"), width = 8, height = 6)
+```
+
+
+#Heatmap Top 100 novel genes
+### Generating heatmap matrix
+```{r select dif expressed non-canonical txs}
+#  Canonical Non-canonical 
+#      22527           819 
+
+sr_difex_non_canon <- sr_resLFC_df %>%
+  subset(padj < 0.01 & canonical_status == "Non-canonical") %>%
+  subset(log2FoldChange >= 1 | log2FoldChange <= -1)
+
+# create heatmap_matrix
+# normalize counts
+sr_dds_not0 <- DESeq2::estimateSizeFactors(sr_dds_not0)
+# save normalized counts
+sr_normalized_counts <- DESeq2::counts(sr_dds_not0, normalized = TRUE)
+# transform counts to z-scores at gene level
+sr_heatmap_matrix <- t(scale(t(sr_normalized_counts)))
+
+# select top 100 differentially expressed genes
+sr_difex_non_canon <- sr_difex_non_canon[order(sr_difex_non_canon$padj),]
+sr_heatmap_matrix <- sr_heatmap_matrix[which(rownames(sr_heatmap_matrix) %in% 
+                                         rownames(sr_difex_non_canon)[1:100]), ]
+```
+
+### Heatmap Annotation
+column annotation
+```{r create column annotation}
+# initiate colors
+cond_cols <- c("#932B2B", "#437ABE")
+#tumor_col <- "#78A245"   #plotting only one tumor type so not useful
+
+# create column annotation metadata
+sr_annot_col <- as.data.frame(sr_metadata[, "condition"])
+colnames(sr_annot_col) <- "condition"
+
+# ComplexHeatmap requires that the column annotation rownames are the same as the column names of the count matrix
+rownames(sr_annot_col) <- colnames(sr_heatmap_matrix)
+
+# Change the characters to factor to force a specific ordering
+sr_annot_col$condition <-
+  factor(sr_annot_col$condition, levels = c("entinostat", "untreated"))
+
+# connecting colors to data with named list
+sr_anno_cols <- list(condition = setNames(cond_cols,
+                                       levels(sr_annot_col$condition)))
+
+sr_ha <- ComplexHeatmap::HeatmapAnnotation(
+  df = sr_annot_col,
+  which = "column",
+  col = sr_anno_cols,
+  show_annotation_name = F, 
+  simple_anno_size = unit(0.3, "cm")
+)
+```
+
+row annotation (doesn't make sense for this heatmap since it only contains novel genes)
+```{r create row annotation}
+# Initiate cols
+class_cols <- c("#4DB3B3", "#F2BF00", "#9973CC")
+
+# Get all the rownames in a variable
+sr_heatmap_genes <- rownames(sr_heatmap_matrix)
+
+# Create mock dataframe
+sr_class_df <- as.data.frame(sr_resLFC_df[,c("gene_id", "gene_type")])
+
+# Create row annotation dataframe that matches the class of the gene ID located in our
+sr_annot_row <- data.frame(class = sr_class_df[match(sr_heatmap_genes, sr_class_df[, "gene_id"]), ]$gene_type)
+
+# same as column annotation, the DF requires row names
+rownames(sr_annot_row) <- sr_heatmap_genes
+
+# Force the order of levels we want
+sr_annot_row$class <-
+  factor(sr_annot_row$class,
+         levels = c("protein coding", "lncRNA", "novel"))
+
+# Connect the values of the row annotation to the colours
+sr_row_cols <-
+  list(class = setNames(class_cols[1:length(levels(sr_annot_row$class))],
+                        levels(sr_annot_row$class)))
+
+
+sr_ha_row <-
+  ComplexHeatmap::HeatmapAnnotation(
+    df = sr_annot_row,
+    show_annotation_name = F,
+    which = "row",
+    col = sr_row_cols,
+    show_legend = F
+  )
+```
+
+### Plot heatmap
+```{r plot}
+#change z-score colors manually
+my_col <- viridis::inferno(100)
+breaks <- seq(-2, 2, length.out = 100)
+
+sr_hm <- ComplexHeatmap::Heatmap(
+                      sr_heatmap_matrix,
+                      top_annotation = sr_ha,
+                      column_km = 2,
+                      #row_km = 2,
+                      #left_annotation = sr_ha_row,
+                      show_row_names = F,
+                      show_row_dend = F,
+                      show_column_names = F,
+                      show_column_dend = F,
+                      column_title = "Top 100 novel genes in Entinostat-treated NBL",
+                      column_title_gp = gpar(fontsize = 12, fontface = "bold"),
+                      # use circlize (installed with ComplexHeatmap) to annotate correct colours
+                      col = circlize::colorRamp2(breaks, my_col),
+                      heatmap_legend_param = list(
+                        legend_direction = "horizontal",
+                        title_position = "topcenter",
+                        legend_width = unit(10, "line"),
+                        title = "Gene Z-scores"
+                                            )
+                      #row_names_gp = gpar(fontsize = 8)
+                      )
+      
+ComplexHeatmap::draw(
+          sr_hm,
+          heatmap_legend_side = "bottom",
+          annotation_legend_side = "right",
+          legend_grouping = "original"
+          )
+```
+
+### Save heatmap
+```{r save}
+file_name = "/sr_top100_novelgenes_heatmap.pdf"
+
+pdf(file = paste0(savedir,file_name), width = 8, height = 6)
+      
+ComplexHeatmap::draw(
+          sr_hm,
+          heatmap_legend_side = "bottom",
+          annotation_legend_side = "right",
+          legend_grouping = "original"
+          )
+
+dev.off()
+```
+
+# Heatmap Top 100 all genes
+### Generating heatmap matrix
+```{r select top 100}
+#  Canonical Non-canonical 
+#      22527           819 
+
+# create heatmap_matrix
+# normalize counts
+sr_dds_not0 <- DESeq2::estimateSizeFactors(sr_dds_not0)
+# save normalized counts
+sr_normalized_counts <- DESeq2::counts(sr_dds_not0, normalized = TRUE)
+# transform counts to z-scores at gene level
+sr_heatmap_matrix <- t(scale(t(sr_normalized_counts)))
+
+# select top 100 differentially expressed genes (ordered by significance)
+sr_order_resLFC_df <- sr_resLFC_df[order(sr_resLFC_df$padj),]
+
+# filter for interesting classes only
+sr_order_resLFC_df <- sr_order_resLFC_df[which(sr_order_resLFC_df$gene_type == "protein_coding" |
+                                         sr_order_resLFC_df$gene_type == "lncRNA" |
+                                         sr_order_resLFC_df$gene_type == "stringtie"),]
+
+sr_order_resLFC_df$gene_type[sr_order_resLFC_df$gene_type == "stringtie"] <- "novel"
+
+table(sr_order_resLFC_df$gene_type)
+
+sr_heatmap_matrix2 <- sr_heatmap_matrix[which(rownames(sr_heatmap_matrix) %in% 
+                                        rownames(sr_order_resLFC_df)[1:100]), ]
+```
+
+### Heatmap Annotation
+column annotation
+```{r create column annotation}
+# initiate colors
+cond_cols <- c("#932B2B", "#437ABE")
+#tumor_col <- "#78A245"   #plotting only one tumor type so not useful
+
+# create column annotation metadata
+sr_annot_col <- as.data.frame(sr_metadata[, "condition"])
+colnames(sr_annot_col) <- "condition"
+
+# ComplexHeatmap requires that the column annotation rownames are the same as the column names of the count matrix
+rownames(sr_annot_col) <- colnames(sr_heatmap_matrix2)
+
+# Change the characters to factor to force a specific ordering
+sr_annot_col$condition <-
+  factor(sr_annot_col$condition, levels = c("entinostat", "untreated"))
+
+# connecting colors to data with named list
+sr_anno_cols <- list(condition = setNames(cond_cols,
+                                       levels(sr_annot_col$condition)))
+
+sr_ha <- ComplexHeatmap::HeatmapAnnotation(
+  df = sr_annot_col,
+  which = "column",
+  col = sr_anno_cols,
+  show_annotation_name = F, 
+  simple_anno_size = unit(0.3, "cm")
+)
+```
+
+
+```{r create row annotation}
+class_cols <- c("#4DB3B3", "#F2BF00", "#9973CC")
+
+# Get all the rownames in a variable
+sr_heatmap_genes2 <- rownames(sr_heatmap_matrix2)
+
+# Create class dataframe
+sr_class_df <- as.data.frame(sr_order_resLFC_df[,c("gene_id", "gene_type")])
+
+# Create row annotation dataframe that matches the class of the gene ID located in our
+sr_annot_row <-
+  data.frame(class = sr_class_df[match(sr_heatmap_genes2, sr_class_df[, "gene_id"]), ]$gene_type)
+
+# same as column annotation, the DF requires row names
+rownames(sr_annot_row) <- sr_heatmap_genes2
+
+# Force the order of levels we want
+sr_annot_row$class <-
+  factor(sr_annot_row$class,
+         levels = c("novel", "protein_coding", "lncRNA"))
+
+# Connect the values of the row annotation to the colours
+sr_row_cols <-
+  list(class = setNames(class_cols[1:length(levels(sr_annot_row$class))],
+                        levels(sr_annot_row$class)))
+
+sr_ha_row <-
+  ComplexHeatmap::HeatmapAnnotation(
+    df = sr_annot_row,
+    show_annotation_name = F,
+    which = "row",
+    col = sr_row_cols,
+    show_legend = T
+  )
+```
+
+### Plot heatmap
+```{r plot}
+#change z-score colors manually
+my_col <- viridis::inferno(100)
+breaks <- seq(-2, 2, length.out = 100)
+
+sr_hm <- ComplexHeatmap::Heatmap(
+                      sr_heatmap_matrix2,
+                      top_annotation = sr_ha,
+                      left_annotation = sr_ha_row,
+                      column_km = 2,
+                      #row_km = 2,
+                      show_row_names = F,
+                      show_row_dend = F,
+                      show_column_names = F,
+                      show_column_dend = F,
+                      column_title = "Top 100 differentially expressed genes in Entinostat-treated NBL",
+                      column_title_gp = gpar(fontsize = 12, fontface = "bold"),
+                      split = sr_annot_row,
+                      row_title_rot = 0,
+                      # use circlize (installed with ComplexHeatmap) to annotate correct colours
+                      col = circlize::colorRamp2(breaks, my_col),
+                      heatmap_legend_param = list(
+                        legend_direction = "horizontal",
+                        title_position = "topcenter",
+                        legend_width = unit(10, "line"),
+                        title = "Gene Z-scores"
+                                            ),
+                      row_names_gp = gpar(fontsize = 8)
+                      )
+      
+ComplexHeatmap::draw(
+          sr_hm,
+          heatmap_legend_side = "bottom",
+          annotation_legend_side = "right",
+          legend_grouping = "original"
+          )
+```
+
+### Save heatmap
+```{r save}
+file_name2 = "/top100_sr_cds-lnc-stringtie_heatmap.pdf"
+
+pdf(file = paste0(savedir,file_name2), width = 8, height = 6)
+      
+ComplexHeatmap::draw(
+          sr_hm,
+          heatmap_legend_side = "bottom",
+          annotation_legend_side = "right",
+          legend_grouping = "original"
+          )
+
+dev.off()
+```
+
+
+# Checking out top genes
+```{r checking}
+# Select all significantly downregulated genes
+sr_alldown <- sr_resLFC_df %>%
+   arrange(padj) %>%
+   subset(padj < 0.05) %>%
+   subset(log2FoldChange < -1) #%>%
+   #subset(gene_type == "novel")
+
+#write.csv(sr_alldown, paste0(savedir,"/sr_alldown.csv"))
+
+# # Select all significantly upregulated genes
+sr_allup <- sr_resLFC_df %>%
+   arrange(padj) %>%
+   subset(padj < 0.05) %>%
+   subset(log2FoldChange > 1) #%>%
+   #subset(gene_type == "novel")
+ 
+#write.csv(sr_allup, paste0(savedir,"/sr_allup.csv"))
+
+# check overlap of downregulated genes
+nrow(sr_alldown) #2355
+nrow(lr_alldown) #912
+
+#check common gene ids
+down_common <- dplyr::intersect(sr_alldown$gene_id, lr_alldown$gene_id)
+length(down_common) #448
+sr_commondown <- sr_alldown[down_common,]
+lr_commondown <- lr_alldown[down_common,]
+sr_uniquedown <- sr_alldown[which(!(rownames(sr_alldown) %in% down_common) &
+                                sr_alldown$gene_type!="novel"),] #not novel: 1857, all: 1907
+lr_uniquedown <- lr_alldown[which(!(rownames(lr_alldown) %in% down_common) &
+                                lr_alldown$gene_type!="novel"),] #464
+
+# check overlap of upregulated genes
+nrow(sr_allup) #6531
+nrow(lr_allup) #2463
+
+#check common gene ids
+up_common <- dplyr::intersect(sr_allup$gene_id, lr_allup$gene_id)
+length(up_common) #1790
+sr_commonup <- sr_allup[up_common,]
+lr_commonup <- lr_allup[up_common,]
+nrow(sr_commonup) == nrow(lr_commonup)
+
+sr_uniqueup <- sr_allup[which(!(rownames(sr_allup) %in% up_common) &
+                                sr_allup$gene_type!="novel"),] #not novel: 4386, all: 4741
+lr_uniqueup <- lr_allup[which(!(rownames(lr_allup) %in% up_common) &
+                                lr_allup$gene_type!="novel"),] #673
+
+
+# sr_unique2 <- sr_allup %>% slice(which(!(rownames(sr_allup) %in% rownames(lr_allup))))
+# nrow(sr_unique2)
+```
+
+
+```{r comparing with longread}
+sr_alldown <- read.csv(paste0(sr_savedir, "/sr_alldown.csv"), header=T, row.names = 1)
+sr_allup <- read.csv(paste0(sr_savedir, "/sr_allup.csv"), header=T, row.names = 1)
+
+# this function should be able to compare dataframes, but i don't trust it
+# summary(arsenal::comparedf(sr_alldown, lr_alldown))
+
+lr_alldown <- read.csv(paste0(savedir,"/lr_alldown.csv"))
+lr_allup <- read.csv(paste0(savedir,"/lr_allup.csv"))
+```
+
+
+## Venn diagram for overlap
+```{r venn setup}
+# Load library
+library(VennDiagram)
+ 
+# Filter out annotated genes
+sr_annotated_down <- sr_alldown %>% filter(gene_type!="novel") %>% select(c(gene_id, gene_type))
+lr_annotated_down <- lr_alldown %>% filter(gene_type!="novel") %>% select(c(gene_id, gene_type))
+
+# Prepare a palette of 2 colors with R colorbrewer:
+colors_venn <- c("darkred", "darkcyan", "#06948E", "#4DB3B3", "#04665E")
+
+# ggVennDiagram
+library(ggVennDiagram)
+
+ggVennDiagram(list(sr_annotated_down$gene_id, lr_annotated_down$gene_id),
+              category.names = c("short-read", "long-read"),
+              set_color = c("darkred", "darkcyan"),
+              force_upset = T,
+              theme_classic())
+
+# UpSetR
+library(UpSetR)
+
+UpSetR::upset(fromList(list(short_read_down = sr_annotated_down$gene_id,
+                            long_read_down = lr_annotated_down$gene_id)),
+              order.by = "freq",
+              main.bar.color = "darkgreen")
+
+UpSetR::upset()
+
+# UpSetPlot --> not available in this version of R
+```
+
+## upset attempt 2
+```{r upset}
+sr_proteincod_down <- sr_alldown %>% filter(gene_type=="protein_coding") %>% select(gene_id)
+lr_proteincod_down <- lr_alldown %>% filter(gene_type=="protein_coding") %>% select(gene_id)
+
+sr_proteincod_up <- sr_allup %>% filter(gene_type=="protein_coding") %>% select(gene_id)
+lr_proteincod_up <- lr_allup %>% filter(gene_type=="protein_coding") %>% select(gene_id)
+
+sr_lncrna_down <- sr_alldown %>% filter(gene_type=="lncRNA") %>% select(gene_id)
+lr_lncrna_down <- lr_alldown %>% filter(gene_type=="lncRNA") %>% select(gene_id)
+
+sr_lncrna_up <- sr_allup %>% filter(gene_type=="lncRNA") %>% select(gene_id)
+lr_lncrna_up <- lr_allup %>% filter(gene_type=="lncRNA") %>% select(gene_id)
+
+set_color = c("#F2BF00", "#9973CC")
+
+#pdf(paste0(savedir,"/upset_protein_coding_down.pdf"), width = 8, height = 6)
+#plot_proteindcod_down <-
+UpSetR::upset(fromList(list(short_protcod_down = sr_proteincod_down$gene_id,
+                            long_protcod_down = lr_proteincod_down$gene_id)),
+                            order.by = "freq",
+                            main.bar.color = "#F2BF00",
+                            mainbar.y.label = "Intersecting Genes",
+                            mainbar.y.max = 2900,
+                            sets.bar.color = "#BBBBBC",
+                            sets.x.label = "Total Genes per Set",
+                            set_size.scale_max = 4100
+                            )
+#dev.off()
+
+#pdf(paste0(savedir,"/upset_protein_coding_up.pdf"), width = 8, height = 6)
+#plot_proteindcod_up <- 
+UpSetR::upset(fromList(list(short_protcod_up = sr_proteincod_up$gene_id,
+                            long_protcod_up = lr_proteincod_up$gene_id)),
+                            order.by = "freq",
+                            main.bar.color = "#F2BF00",
+                            mainbar.y.label = "Intersecting Genes",
+                            mainbar.y.max = 2900,
+                            sets.bar.color = "#BBBBBC",
+                            sets.x.label = "Total Genes per Set",
+                            set_size.scale_max = 4100
+                            )
+#dev.off()
+
+library(ggplotify)
+ggarrange(as.grob(plot_proteindcod_down), as.grob(plot_proteindcod_up))
+ggsave(paste0(savedir, "/upset_proteincod.pdf"), width = 8, height = 6)
+
+#pdf(paste0(savedir,"/upset_lncrna_down.pdf"), width = 8, height = 6)
+#plot_proteindcod_down
+UpSetR::upset(fromList(list(short_lncrna_down = sr_lncrna_down$gene_id,
+                            long_lncrna_down = lr_lncrna_down$gene_id)),
+                            order.by = "freq",
+                            main.bar.color = "#9973CC",
+                            mainbar.y.label = "Intersecting Genes",
+                            mainbar.y.max = 2900,
+                            sets.bar.color = "#BBBBBC",
+                            sets.x.label = "Total Genes per Set",
+                            set_size.scale_max = 4100
+                            )
+#dev.off()
+
+#pdf(paste0(savedir,"/upset_lncrna_up.pdf"), width = 8, height = 6)
+#plot_proteindcod_up
+UpSetR::upset(fromList(list(short_lncrna_up = sr_lncrna_up$gene_id,
+                            long_lncrna_up = lr_lncrna_up$gene_id)),
+                            order.by = "freq",
+                            main.bar.color = "#9973CC",
+                            mainbar.y.label = "Intersecting Genes",
+                            mainbar.y.max = 2900,
+                            sets.bar.color = "#BBBBBC",
+                            sets.x.label = "Total Genes per Set",
+                            set_size.scale_max = 4100
+                            )
+#dev.off()
+
+```
+
+
+
