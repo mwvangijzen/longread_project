@@ -1,0 +1,98 @@
+---
+title: "Plot chromosomes"
+author: "MG"
+output: html_document
+date: "2024-02-19"
+---
+
+# Setup
+```{r setup}
+workdir = "/hpc/pmc_vanheesch/projects/mvangijzen/nbl_longread"
+shortdir = "/hpc/pmc_vanheesch/projects/mvangijzen/nbl_shortread/analysis"
+analysisdir = paste0(workdir, "/analysis")
+savedir = paste0(workdir, "/results/chrom_plots")
+```
+
+# Libraries
+```{r libraries}
+library(rtracklayer)
+library(magrittr)
+library(ggplot2)
+library(viridis)
+library(dplyr)
+library(ggpubr)
+library(tidyverse)
+library(chromPlot)
+library("TxDb.Hsapiens.UCSC.hg38.knownGene")
+library(GenomicFeatures)
+```
+
+# Load data
+```{r assign file names}
+lr_gtf_file = paste0(workdir,"/analysis/gffcompare_combine/customannotation/nbl_longread_transcriptome_novel_filtered_fixed.gtf")
+sr_gtf_file = paste0(shortdir,"/customannotation/nbl_shortread_transcriptome_novel_filtered_new_new.gtf")
+```
+
+```{r load gtf files}
+#import gtf, then convert to df
+lr_gtf <- rtracklayer::import(lr_gtf_file)
+#lr_gtf_df <- as.data.frame(lr_gtf)
+sr_gtf <- rtracklayer::import(sr_gtf_file)
+```
+
+# chromPlot practice
+```{r chromPlot setup}
+library(chromPlot)
+data(hg_gap)
+head(hg_gap)
+
+library("TxDb.Hsapiens.UCSC.hg38.knownGene")
+txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene
+library(GenomicFeatures)
+txgr <- transcripts(txdb)
+```
+
+# plot long read gtf
+```{r chromPlot setup}
+txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene
+txgr <- transcripts(txdb)
+```
+
+The GRanges object should be provided in annot1
+Gaps should be assigned length of chroms and loci of telomeres and centromeres
+```{r plot chromosomes}
+chromPlot(gaps = hg_gap,    #define reference genome structure
+          annot1 = lr_gtf,  #define genomic data object
+          annot2 = sr_gtf,
+          colAnnot2 = "darkcyan",
+          chrSide = c(-1,1,1,1,1,1,1,1), #need to assign chr side for all possible 
+          # tracks, even when they are not defined
+          chr = c(1:3),     #define which chromosomes are displayed
+          #bin = 50000,
+          figCols = 3,      #define the number of columns of the figure
+          legChrom = "3")
+```
+
+```{r save plot}
+# Step 1: Call the pdf command to start the plot
+pdf(file = paste0(savedir,"/long_short_123.pdf"))
+
+# Step 2: Create the plot
+chromPlot(gaps = hg_gap,    #define reference genome structure
+          annot1 = lr_gtf,  #define genomic data object
+          annot2 = sr_gtf,
+          colAnnot2 = "darkcyan",
+          chrSide = c(-1,1,1,1,1,1,1,1), #need to assign chr side for all possible tracks, even when they are not defined
+          chr = c(1:3),     #define which chromosomes are displayed
+          #bin = 50000,
+          figCols = 3)      #define the number of columns of the figure
+
+# Step 3: Run dev.off() to create the file!
+dev.off()
+```
+
+If you plot the lr_gtf without providing the gaps, it also tries to plot 
+mitochondrial transcripts and unlocalized contigs
+
+
+

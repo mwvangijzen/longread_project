@@ -1,0 +1,344 @@
+---
+title: "Long versus short"
+author: "MG"
+output: html_document
+date: "2024-01-31"
+---
+
+# Setup
+```{r setup}
+workdir = "/hpc/pmc_vanheesch/projects/mvangijzen/nbl_longread"
+sourcedir = "/hpc/pmc_vanheesch/projects/mvangijzen/nbl_shortread/scripts/02_rnaseq_assembly"
+analysisdir = paste0(workdir, "/analysis")
+savedir = paste0(workdir, "/results/long_vs_short/amc691b_only")
+```
+
+# Libraries
+```{r libraries}
+library(rtracklayer)
+library(GenomicFeatures)
+library(splicejam)
+library(magrittr)
+library(ggplot2)
+library(RColorBrewer)
+library(viridis)
+library(dplyr)
+library(ggpubr)
+library(tidyverse)
+
+source(paste0(sourcedir,"/filter_annotate_functions.R"))
+```
+
+# Load data
+```{r assign file names}
+lr_gtf_file = paste0(workdir,"/analysis/gffcompare_combine/customannotation/nbl_longread_transcriptome_novel_filtered_fixed.gtf")
+#sr_gtf_file = paste0(workdir,"/analysis/short_read_comparison/NBL_transcriptome_full_novel_filtered_new_new_fixed_n3.sorted.gtf")
+amc691b_sr_gtf_file = "/hpc/pmc_vanheesch/projects/mvangijzen/nbl_shortread/analysis/customannotation/nbl_shortread_transcriptome_novel_filtered_new_new_len3.gtf"
+```
+
+```{r load gtf files}
+#import gtf, then convert to df
+# for long-read transcriptome
+lr_gtf <- rtracklayer::import(lr_gtf_file)
+lr_gtf_df <- as.data.frame(lr_gtf)
+
+# for short-read transcriptome
+amc691b_sr_gtf <- rtracklayer::import(amc691b_sr_gtf_file)
+amc691b_sr_gtf_df <- as.data.frame(amc691b_sr_gtf)
+```
+
+# Add exon_id & remove single exon transcripts
+```{r editing longread gtf}
+# create exon_id based on transcript_id and exon_number
+lr_gtf_df$exon_id <- ifelse(!is.na(lr_gtf_df$exon_number),
+                             paste0(lr_gtf_df$transcript_id, "_", 
+                                    lr_gtf_df$exon_number), NA)
+
+# Checked for mono-exonic transcripts with this function from the filter_annotate_functions.R
+mono_exonic_novel <- count_mono_exonics(gtf = lr_gtf_df)
+lr_gtf_df <- lr_gtf_df[!(lr_gtf_df$transcript_id %in% 
+                                 mono_exonic_novel$transcript_id), ]
+# the mono_exonic_novel was empty so they were already filtered out
+
+lr_outfile <- paste0(analysisdir,"/short_read_comparison/exon_id_gtfs/nbl_longread_exons.gtf")
+rtracklayer::export(lr_gtf_df, lr_outfile, format = "gtf", index = FALSE)
+```
+
+```{r editing shortread gtf}
+# add exon_ids
+amc691b_sr_gtf_df$exon_id <- ifelse(!is.na(amc691b_sr_gtf_df$exon_number),
+                             paste0(amc691b_sr_gtf_df$transcript_id, "_",
+                                    amc691b_sr_gtf_df$exon_number), NA)
+
+# Checked for mono-exonic transcripts with this function from the filter_annotate_functions.R
+mono_exonic_novel <- count_mono_exonics(gtf = amc691b_sr_gtf_df)
+amc691b_sr_gtf_df <- amc691b_sr_gtf_df[!(amc691b_sr_gtf_df$transcript_id %in% 
+                                 mono_exonic_novel$transcript_id), ]
+# the mono_exonic_novel was empty so they were already filtered out
+
+sr_outfile <- paste0(analysisdir,"/short_read_comparison/exon_id_gtfs/nbl_amc691b_shortread_exons.gtf")
+rtracklayer::export(amc691b_sr_gtf_df, sr_outfile, format = "gtf", index = FALSE)
+```
+
+# Filter transcripts
+```{r filtering}
+lr_all_tx_gen <- lr_gtf_df %>%
+  dplyr::filter(type == 'transcript' | type == 'gene')
+
+lr_transcripts <- lr_gtf_df %>%
+  dplyr::filter(type == 'transcript') %>%
+  dplyr::filter(class_code != 'NA')
+  #use dplyr::select() to only look at specific columns?
+
+lr_all_exons <- lr_gtf_df %>%
+  dplyr::filter(type == 'exon')
+
+sr_all_transcripts <- amc691b_sr_gtf_df %>%
+  dplyr::filter(type =='transcript')
+
+sr_transcripts <- amc691b_sr_gtf_df %>%
+  dplyr::filter(type == 'transcript') %>%
+  dplyr::filter(class_code != 'NA' & class_code != '.')
+
+sr_all_exons <- amc691b_sr_gtf_df %>%
+  dplyr::filter(type == 'exon')
+```
+
+# Plot transcript class stats
+## Plot 1.1: all classes long read
+```{r plot}
+class_plot1 <- ggplot(lr_transcripts, aes(fill=class_code, x=class_code)) +
+  geom_bar(stat = "count") +
+  scale_fill_viridis_d() +
+  labs(title= "Long-read class distribution", x="Isoform Class", 
+       y="Transcripts", fill="class_code") +
+  coord_cartesian(ylim = c(0,9000)) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_y_continuous(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 1))
+
+class_plot1
+```
+
+## Plot 2: all classes short read
+```{r plot}
+class_plot2 <- ggplot(sr_transcripts, aes(fill=class_code, x=class_code)) +
+  geom_bar(stat = "count") +
+  scale_fill_viridis_d() +
+  labs(title= "Short-read class distribution", x="Isoform Class", 
+       y="Transcripts", fill="class_code") +
+  coord_cartesian(ylim = c(0,9000)) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_y_continuous(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 1))
+
+class_plot2
+```
+
+## Combine class distributions
+```{r combine plots}
+class_lrvsr <- ggarrange(class_plot1, class_plot2, 
+          common.legend = FALSE)
+
+class_lrvsr
+
+ggsave(filename = "class_distribution_long_vs_short.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+```{r plot}
+class_plot3 <- ggplot(lr_all_transcripts %>% replace_na(list(class_code = "zz")), 
+                      aes(fill=class_code, x=class_code)) +
+  geom_bar(stat = "count") +
+  scale_fill_viridis_d() +
+  labs(title= "Long-read class distribution", x="Isoform Class", 
+       y="Transcripts", fill="class_code") +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_y_continuous(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 1))
+
+class_plot3
+```
+
+# Plot transcript stats
+## Long read
+```{r plot length distribution}
+lr_tx_length <- lr_transcripts %>%
+  dplyr::filter(class_code!="=" | class_code!="NA") %>%
+  ggplot(aes(width)) +
+    geom_histogram(binwidth=30,fill="darkcyan") +
+    coord_cartesian(xlim = c(0,20000),
+                    ylim = c(0,50)) +
+    labs(x="Transcript length (bases)", y="Count",
+         title = "Transcript length distribution long reads") +
+    theme_classic() +
+    # geom_vline(xintercept = mean(lr_all_transcripts$width), 
+    #            color="black", linetype="dashed", linewidth=0.6) +
+    scale_y_continuous(expand = c(0, 0)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    facet_wrap(~class_code) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+lr_tx_length
+
+ggsave(filename = "transcript_length_byclass_long.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+## Short read
+```{r plot length distribution}
+sr_filtered_transcripts <- sr_transcripts %>%
+  dplyr::filter(class_code=="i" | class_code=="k" | class_code=="o" | 
+                class_code=="u" | class_code=="x" | class_code=="y") 
+#table(sr_filtered_transcripts$class_code)
+
+sr_tx_length <- sr_filtered_transcripts %>%
+  ggplot(aes(width)) +
+    geom_histogram(binwidth=30,fill="darkcyan") +
+    coord_cartesian(xlim = c(0,20000),
+                    ylim = c(0,50)) +
+    labs(x="Transcript length (bases)", y="Count",
+         title = "Transcript length distribution short reads") +
+    theme_classic() +
+    # geom_vline(xintercept = mean(lr_all_transcripts$width), 
+    #            color="black", linetype="dashed", linewidth=0.6) +
+    scale_y_continuous(expand = c(0, 0)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    facet_wrap(~class_code) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+sr_tx_length
+
+ggsave(filename = "transcript_length_byclass_short.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+# Isoform count
+## Number of isoforms per transcript long read
+```{r count isoforms}
+lr_all_tx_gen <- subset(lr_gtf_df, type != "exon") #remove exons since these also get an xloc assigned 
+lr_isoform_count <- as.data.frame(table(lr_all_tx_gen$xloc))
+colnames(lr_isoform_count) <- c("xloc", "count")
+```
+
+```{r plot isoform count distribution}
+plot_lr_isoform_count <- lr_isoform_count %>%
+  ggplot(aes(count)) +
+    geom_histogram(binwidth=1,fill="darkcyan") +
+    labs(x="Isoforms per transcript", y="Count",
+         title = "Isoform count distribution long read") +
+    theme_classic() +
+    coord_cartesian(xlim = c(0,52), 
+                    ylim = c(0,6500)) +
+    scale_y_continuous(expand = c(0, 0)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+plot_lr_isoform_count
+
+ggsave(filename = "isoform_count_distribution_long.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+## Number of isoforms per transcript short reads
+```{r count isoforms}
+sr_all_tx_gen <- subset(amc691b_sr_gtf_df, type != "exon") #remove exons since these also get an xloc assigned 
+sr_isoform_count <- as.data.frame(table(sr_all_tx_gen$xloc))
+colnames(sr_isoform_count) <- c("xloc", "count")
+```
+
+```{r plot isoform count distribution}
+plot_sr_isoform_count <- sr_isoform_count %>%
+  ggplot(aes(count)) +
+    geom_histogram(binwidth=1,fill="darkcyan") +
+    labs(x="Isoforms per transcript", y="Count",
+         title = "Isoform count distribution short read") +
+    coord_cartesian(xlim = c(0,52), 
+                    ylim = c(0,6500)) +
+    theme_classic() +
+    scale_y_continuous(expand = c(0, 0)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+plot_sr_isoform_count
+
+ggsave(filename = "isoform_count_distribution_short.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+```{r combine plots}
+ggarrange(plot_lr_isoform_count, #+ rremove("xlab"), 
+          plot_sr_isoform_count, #+ rremove("xlab"), 
+          common.legend = FALSE)
+
+ggsave(filename = "isoform_count_long_vs_short.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+## Number of isoforms per transcript
+```{r count isoforms}
+comp_isoform_count <- as.data.frame(table(comp_gtf_df$xloc))
+colnames(comp_isoform_count) <- c("xloc", "count")
+```
+
+```{r plot isoform count distribution}
+plot_isoform_count <- comp_isoform_count %>%
+  ggplot(aes(count)) +
+    geom_histogram(binwidth=1,fill="darkcyan") +
+    #coord_cartesian(xlim = c(0,20000)) +
+    labs(x="Isoforms per transcript", y="Count",
+         title = "Isoform count distribution") +
+    theme_classic() +
+    # geom_vline(xintercept = mean(lr_all_transcripts$width), 
+    #            color="black", linetype="dashed", linewidth=0.6) +
+    scale_y_continuous(expand = c(0, 0)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+plot_isoform_count
+```
+
+
+GffCompare was run on the lr_gtf_nonequal and the (amc691b_)sr_gtf_nonequal, with the 
+short read gtf as a reference annotation. The results of this comparison were
+saved with the long_cmp_(amc691b_)short prefix.
+
+# Load comparison gtf
+```{r assign file names}
+comp_gtf_file = paste0(workdir,"/analysis/short_read_comparison/long_cmp_amc691b_short.annotated.gtf")
+```
+
+```{r load gtf files}
+#import gtf, then convert to df
+comp_gtf <- rtracklayer::import(comp_gtf_file)
+comp_gtf_df <- as.data.frame(comp_gtf)
+```
+
+

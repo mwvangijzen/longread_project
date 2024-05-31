@@ -1,0 +1,361 @@
+---
+title: "check_bams"
+author: "MG"
+output: html_document
+date: "2023-12-19"
+---
+
+# Setup
+```{r setup}
+workdir = "/hpc/pmc_vanheesch/projects/mvangijzen/nbl_longread"
+savedir = "/hpc/pmc_vanheesch/projects/mvangijzen/nbl_longread/results"
+colors = RColorBrewer::brewer.pal(6, "Dark2")
+```
+
+# Libraries
+```{r libraries}
+library(GenomicRanges)
+library(rtracklayer)
+library(Gviz)
+library(Rsamtools)
+library(GenomeInfoDb)
+library(BiocGenerics)
+```
+
+# Load long-read data
+## Load gtf
+```{r load gtf}
+gtf_file = paste0(workdir,"/analysis/gffcompare_combine/customannotation/nbl_longread_transcriptome_novel_filtered_fixed.gtf")
+custom_annotation <- import(gtf_file)
+genome(custom_annotation) <- "hg38"
+seqlevels(custom_annotation) <- seqlevelsInUse(custom_annotation)
+txdb <- GenomicFeatures::makeTxDbFromGFF(gtf_file)
+genome(txdb) <- "hg38"
+```
+
+## Load bigwigs
+```{r load bigwigs}
+A13_bw_file =  paste0(workdir,"/analysis/bam_bw/A13_all.bw")
+A13_bw <- import(A13_bw_file)
+A14_bw_file =  paste0(workdir,"/analysis/bam_bw/A14_all.bw")
+A14_bw <- import(A14_bw_file)
+A15_bw_file =  paste0(workdir,"/analysis/bam_bw/A15_all.bw")
+A15_bw <- import(A15_bw_file)
+
+E02_bw_file =  paste0(workdir,"/analysis/bam_bw/E02_all.bw")
+E02_bw <- import(E02_bw_file)
+E03_bw_file =  paste0(workdir,"/analysis/bam_bw/E03_all.bw")
+E03_bw <- import(E03_bw_file)
+E05_bw_file =  paste0(workdir,"/analysis/bam_bw/E05_all.bw")
+E05_bw <- import(E05_bw_file)
+```
+
+## Load bams
+```{r load bams}
+A13_bam_file = paste0(workdir,"/analysis/sorted_bams/A13_reads_aln_sorted.bam")
+#A13_bam <- import(A13_bam_file)
+A14_bam_file = paste0(workdir,"/analysis/sorted_bams/A14_reads_aln_sorted.bam")
+A15_bam_file = paste0(workdir,"/analysis/sorted_bams/A15_reads_aln_sorted.bam")
+
+E02_bam_file = paste0(workdir,"/analysis/sorted_bams/E02_reads_aln_sorted.bam")
+E03_bam_file = paste0(workdir,"/analysis/sorted_bams/E03_reads_aln_sorted.bam")
+E05_bam_file = paste0(workdir,"/analysis/sorted_bams/E05_reads_aln_sorted.bam")
+```
+
+# Load short-read data
+## Load gtf
+```{r load sr gtf}
+amc691b_sr_gtf_file = "/hpc/pmc_vanheesch/projects/mvangijzen/nbl_shortread/analysis/customannotation/nbl_shortread_transcriptome_novel_filtered_new_new_len3.gtf"
+sr_custom_annotation <- import(amc691b_sr_gtf_file)
+genome(sr_custom_annotation) <- "hg38"
+seqlevels(sr_custom_annotation) <- seqlevelsInUse(sr_custom_annotation)
+sr_txdb <- GenomicFeatures::makeTxDbFromGFF(amc691b_sr_gtf_file)
+genome(sr_txdb) <- "hg38"
+```
+
+# Gviz parameters
+```{r gviz params}
+options(ucscChromosomeNames = FALSE) # Use annotation like "2" instead of "chr2"
+
+chr <- as.character(unique(seqnames(custom_annotation)))
+gen <- GenomeInfoDb::genome(txdb)
+
+# set general tracks
+gtrack <- GenomeAxisTrack(add53 = TRUE, add35 = TRUE)
+```
+
+# Gviz setup
+## Set transcript tracks
+```{r gviz}
+transcript_track <- GeneRegionTrack(txdb, 
+                                    genome = "hg38", 
+                                    name = "Transcripts",
+                                    type = "h",
+                                    showId = F,
+                                    fill = "black", 
+                                    col = "black")
+
+sr_transcript_track <- GeneRegionTrack(sr_txdb, 
+                                    genome = "hg38", 
+                                    name = "Transcripts (short reads)",
+                                    type = "h",
+                                    showId = F,
+                                    fill = "darkgrey", 
+                                    col = "darkgrey")
+```
+
+## Set coverage tracks
+```{r load bw tracks}
+A13_bw_track <- DataTrack(range = A13_bw, 
+                     type = "l", 
+                     name = "Coverage (log(x))",
+                     transformation=function(x) log(x+1),
+                     #col.histogram= "#377EB8", 
+                     fill=colors[1],
+                     #background.panel = "#f5f9fc",
+                     groups = factor("control", 
+                        levels = c("control", "entinostat")), 
+                     legend = FALSE)
+
+A14_bw_track <- DataTrack(range = A14_bw, 
+                     type = "l", 
+                     name = "Coverage (log(x))",
+                     transformation=function(x) log(x+1),
+                     #col.histogram= "#377EB8", 
+                     fill=colors[2],
+                     #background.panel = "#f5f9fc",
+                     groups = factor("control", 
+                        levels = c("control", "entinostat")), 
+                     legend = FALSE)
+
+A15_bw_track <- DataTrack(range = A15_bw, 
+                     type = "l", 
+                     name = "Coverage (log(x))",
+                     transformation=function(x) log(x+1),
+                     #col.histogram= "#377EB8", 
+                     fill=colors[3],
+                    #background.panel = "#f5f9fc",
+                     groups = factor("control", 
+                        levels = c("control", "entinostat")), 
+                     legend = FALSE)
+
+E02_bw_track <- DataTrack(range = E02_bw, 
+                     type = "l", 
+                     name = "Coverage (log(x))",
+                     transformation=function(x) log(x+1),
+                     #col.histogram= "#FFA500", 
+                     fill=colors[4],
+                     #background.panel = "#f5f9fc",
+                     groups = factor("entinostat", 
+                        levels = c("control", "entinostat")), 
+                     legend = TRUE)
+
+E03_bw_track <- DataTrack(range = E03_bw, 
+                     type = "l", 
+                     name = "Coverage (log(x))",
+                     transformation=function(x) log(x+1),
+                     #col.histogram= "#FFA500", 
+                     fill=colors[5],
+                     #background.panel = "#f5f9fc",
+                     groups = factor("entinostat", 
+                        levels = c("control", "entinostat")), 
+                     legend = TRUE)
+
+E05_bw_track <- DataTrack(range = E05_bw, 
+                     type = "l", 
+                     name = "Coverage (log(x))",
+                     transformation=function(x) log(x+1),
+                     #col.histogram= "#FFA500", 
+                     fill=colors[6],
+                     #background.panel = "#f5f9fc",
+                     groups = factor("entinostat", 
+                        levels = c("control", "entinostat")), 
+                     legend = TRUE)
+
+# combining datatracks
+otA <- OverlayTrack(trackList=list(A13_bw_track, A14_bw_track, A15_bw_track))
+
+otE <- OverlayTrack(trackList=list(E02_bw_track, E03_bw_track, E05_bw_track))
+
+ot2 <- OverlayTrack(trackList=list(A13_bw_track, A14_bw_track, A15_bw_track,
+                                   E02_bw_track, E03_bw_track, E05_bw_track))
+```
+
+## Set alignment tracks
+```{r load read track}
+A13_readtrack <- AlignmentsTrack(range = A13_bam_file,
+                                 chromosome = "2",
+                                 name = "Aligned reads A13",
+                                 isPaired = FALSE,
+                                 stacking="squish",
+                                 fill = "black",
+                                 col = "black")
+```
+
+
+# Gviz plot
+```{r gviz plot}
+plotTracks(list(gtrack, transcript_track, 
+                sr_transcript_track, otA, otE),
+           chromosome = "2",
+           #groups = rep(c("control", "entinostat"), each = 3), 
+           #?type = c("b"), 
+           #aggregateGroups = TRUE, 
+           #?aggregation = "max",
+           ylim = c(0,11),
+           from = 16198613, to = 16201953)
+```
+```{r save plot}
+# Step 1: Call the pdf command to start the plot
+pdf(file = paste0(savedir,"/gviz_A13reads.pdf"))
+
+# Step 2: Create the plot
+plotTracks(list(gtrack, transcript_track, 
+                sr_transcript_track, otA, otE,
+                A13_readtrack),
+           chromosome = "2",
+           ylim = c(0,11),
+           from = 16198613, to = 16201953)
+
+# Step 3: Run dev.off() to create the file!
+dev.off()
+```
+
+
+for candidate 13030
+```{r gviz plot zoom}
+ht <- HighlightTrack(trackList = list(gtrack, transcript_track, 
+                                      sr_transcript_track,
+                                      ot2),
+                     start = 16198813, end = 16201753,
+                     chromosome = "2",
+                     col = "red",
+                     fill = "white",
+                     lwd = 1.5)
+
+plotTracks(trackList = list(ht),
+           chromosome = "2",
+           ylim = c(-1,11),
+           from = 16197613, to = 16202953)
+
+```
+```{r save plot}
+# Step 1: Call the pdf command to start the plot
+pdf(file = paste0(savedir,"/gviz_13030_longcov_new.pdf"), width = 8, height = 5)
+
+# Step 2: Create the plot
+ht <- HighlightTrack(trackList = list(gtrack, transcript_track, 
+                                      sr_transcript_track,
+                                      ot2),
+                     start = 16198813, end = 16201753,
+                     chromosome = "2",
+                     col = "red",
+                     fill = "white",
+                     lwd = 1.5)
+
+plotTracks(trackList = list(ht),
+           chromosome = "2",
+           ylim = c(-1,11),
+           from = 16197613, to = 16202953)
+
+# Step 3: Run dev.off() to create the file!
+dev.off()
+```
+
+for candidate XLOC_154645
+```{r gviz plot zoom}
+ht2 <- HighlightTrack(trackList = list(gtrack, transcript_track, 
+                                      sr_transcript_track,
+                                      ot2),
+                     start = 118053740, end = 118244419,
+                     chromosome = "X",
+                     fill = "white",
+                     col = "red",
+                     lwd = 1.5)
+
+plotTracks(trackList = list(ht2),
+           chromosome = "X",
+           ylim = c(-1,11),
+           from = 118052540, to = 118245619)
+
+
+```
+
+for candidate XLOC_131840
+```{r gviz plot zoom}
+ht3 <- HighlightTrack(trackList = list(gtrack, transcript_track, 
+                                      sr_transcript_track,
+                                      ot2),
+                     start = 74500484, end = 74505489,
+                     chromosome = "7",
+                     fill = "white",
+                     col = "red",
+                     lwd = 1.5)
+
+plotTracks(trackList = list(ht3),
+           chromosome = "7",
+           ylim = c(-1,11),
+           from = 74499984, to = 74505989)
+
+```
+
+for candidate XLOC_089992
+```{r gviz plot zoom}
+ht4 <- HighlightTrack(trackList = list(gtrack, transcript_track, 
+                                      sr_transcript_track,
+                                      ot2),
+                     start = 11451012, end = 11685931,
+                     chromosome = "22",
+                     fill = "white",
+                     col = "red",
+                     lwd = 1.5)
+
+plotTracks(trackList = list(ht4),
+           chromosome = "22",
+           ylim = c(-1,11),
+           from = 11450912, to = 11686031)
+           
+
+```
+
+for GAPDH
+```{r gviz plot zoom}
+ht <- HighlightTrack(trackList = list(gtrack, transcript_track, 
+                                      sr_transcript_track,
+                                      ot2),
+                     start = 6534512, end = 6538374,
+                     chromosome = "12",
+                     col = "red",
+                     fill = "white",
+                     lwd = 1.5)
+
+plotTracks(trackList = list(ht),
+           chromosome = "12",
+           ylim = c(-1,11),
+           from = 6534112, to = 6538874)
+
+```
+
+```{r save plot}
+# Step 1: Call the pdf command to start the plot
+pdf(file = paste0(savedir,"/gviz_GAPDH_longcov.pdf"),
+    width = 16, height = 10)
+
+# Step 2: Create the plot
+ht <- HighlightTrack(trackList = list(gtrack, transcript_track, 
+                                      sr_transcript_track,
+                                      ot2),
+                     start = 6534512, end = 6538374,
+                     chromosome = "12",
+                     col = "red",
+                     fill = "white",
+                     lwd = 1.5)
+
+plotTracks(trackList = list(ht),
+           chromosome = "12",
+           ylim = c(-1,11),
+           from = 6534112, to = 6538874)
+
+# Step 3: Run dev.off() to create the file
+dev.off()
+```

@@ -1,0 +1,209 @@
+---
+title: "GTF filtering/fixing"
+output: html_notebook
+---
+
+gtf filtering notebook based on Damon's neuroblastoma filtering/fixing steps
+
+# Setup
+```{r setup}
+workdir <- "/hpc/pmc_vanheesch/projects/mvangijzen/nbl_shortread"
+```
+
+```{r}
+library(rtracklayer)
+library(data.table)
+library(tidyverse)
+```
+
+```{r}
+functions_file = paste0(workdir,"/scripts/02_rnaseq_assembly/filter_annotate_functions.R")
+source(functions_file)
+```
+
+```{r}
+# gtf_refseq_basename = args[4]
+gtf_refseq_basename = "/hpc/pmc_vanheesch/shared_resources/GENOMES/Homo_sapiens.GRCh38/102/annotation/Homo_sapiens.GRCh38.p13"
+#min_occurrence = 4
+min_occurrence = 3
+```
+
+```{r}
+## Load reference GTF
+gtf_reference <- rtracklayer::import.gff("/hpc/pmc_vanheesch/shared_resources/GENOMES/Homo_sapiens.GRCh38/102/annotation/Homo_sapiens.GRCh38.102.gtf", colnames = c(
+  "type",
+  "source",
+  "gene_id",
+  "gene_name",
+  "gene_biotype",
+  "transcript_id",
+  "transcript_name"
+))
+gtf_ref_df <- as.data.frame(gtf_reference)
+```
+
+```{r}
+novel_gtf <- import(paste0(workdir, "/analysis/gffcompare/nbl_shortread_transcriptome/nbl_shortread_transcriptome.combined.gtf"))
+```
+
+
+```{r}
+# Filtering and annotation #####################################################
+message(paste(Sys.time(), "Removing transcripts on scaffolds ..."), sep = "\t")
+novel_gtf <- novel_gtf[seqnames(novel_gtf) %in% c(1:22, "X", "Y"), ]
+
+message(paste(Sys.time(), "Removing unstranded transcripts ..."), sep = "\t")
+novel_gtf <- novel_gtf[strand(novel_gtf) != "*", ]
+
+novel_gtf_df <- data.frame(novel_gtf)
+novel_gtf_df$num_samples <- as.numeric(novel_gtf_df$num_samples)
+```
+
+```{r}
+# Remove low abundance transcripts
+message(paste0(Sys.time(), "\t", "Filtering transcripts found in fewer than ", min_occurrence, " samples ..."))
+transcripts_keep <- subset(novel_gtf_df, type == "transcript" & num_samples >= min_occurrence)$transcript_id
+novel_gtf_df <- novel_gtf_df[which(novel_gtf_df$transcript_id %in% transcripts_keep),]
+```
+
+```{r}
+## Remove unwanted transcript classes
+transcripts_discard <- novel_gtf_df[which(novel_gtf_df$type == "transcript" &
+                                                 novel_gtf_df$class_code %in% c("=", "c", "j", "m", "n", "e", "r", "s")), ]
+novel_gtf_df <- novel_gtf_df[which(!(novel_gtf_df$transcript_id %in% transcripts_discard$transcript_id)), ]
+```
+
+```{r}
+## Load original tracking file
+tracking_file <- paste0(workdir,"/analysis/gffcompare/nbl_shortread_transcriptome/nbl_shortread_transcriptome.tracking")
+
+tracking <- data.table::fread(tracking_file, header = F, select = c(1:4)) %>%
+  tidyr::separate(V3, into = c("ref_gene_id_annotated", "ref_transcript_id_annotated"), sep = "\\|") 
+
+colnames(tracking) <- c("TCONS", "xloc", "ref_gene_id", "ref_transcript_id", "class_code")
+```
+
+```{r}
+novel_gtf_df <- novel_gtf_df %>%
+  left_join(tracking[, c(1:4)], by = c("transcript_id" = "TCONS"))
+```
+
+
+
+```{r}
+setDT(novel_gtf_df)
+# Now using data.table's by-reference assignment to fill in NA values with the corresponding values from the 'transcript' rows
+novel_gtf_df[, c('gene_name', 'oId', 'cmp_ref', 'class_code', 'cmp_ref_gene', 'ref_gene_id') := {
+  # Locate the 'transcript' row
+  w <- which(type == 'transcript')
+  # If no 'transcript' row is found, do nothing
+  if (length(w) == 0) return(.SD)
+  # Carry the values from the 'transcript' row to 'exon' rows
+  lapply(.SD, function(x) { x[is.na(x)] <- x[w]; x })
+}, by = transcript_id, .SDcols = c('gene_name', 'oId', 'cmp_ref', 'class_code', 'cmp_ref_gene', 'ref_gene_id')]
+```
+
+```{r}
+# Update the gene_id column using vectorized operations
+novel_gtf_df$gene_id <- ifelse(
+  novel_gtf_df$ref_gene_id != "-" & is.na(novel_gtf_df$cmp_ref_gene), 
+  novel_gtf_df$ref_gene_id, 
+  novel_gtf_df$gene_id)
+
+novel_gtf_df$gene_name <- ifelse(
+  is.na(novel_gtf_df$gene_name),
+  novel_gtf_df$gene_id, 
+  novel_gtf_df$gene_name
+)
+```
+
+```{r}
+message(paste(Sys.time(), "Removing mono-exonic transcripts ..."), sep = "\t")
+mono_exonic_novel <- count_mono_exonics(gtf = novel_gtf_df)
+novel_gtf_df <-
+  novel_gtf_df[!(novel_gtf_df$transcript_id %in% mono_exonic_novel$transcript_id), ]
+```
+
+
+
+
+```{r}
+novel_gtf_multiple_strands <- novel_gtf_df %>%
+  group_by(gene_id) %>%
+  summarize(nstrands = length(unique(strand)))
+
+any(novel_gtf_multiple_strands$nstrands > 1)
+```
+
+```{r}
+## Flagging RefSeq transcripts
+message(paste(Sys.time(), "Flagging XR transcript overlap ..."), sep = "\t")
+novel_gtf_df <- annotate_overlap(gtf = novel_gtf_df,
+                              gtf_refseq_basename = gtf_refseq_basename,
+                              x_name = "xr")
+
+message(paste(Sys.time(), "Flagging NR transcript overlap ..."), sep = "\t")
+novel_gtf_df <- annotate_overlap(gtf = novel_gtf_df,
+                              gtf_refseq_basename = gtf_refseq_basename,
+                              x_name = "nr")
+
+novel_gtf_df <- data.frame(novel_gtf_df)
+```
+
+```{r}
+## Add biotype to custom annotation based on reference ID 
+message(paste(Sys.time(), "Adding biotype to StringTie transcripts ..."),
+        sep = "\t")
+novel_gtf_df$gene_biotype <-
+  gtf_ref_df$gene_biotype[match(novel_gtf_df$gene_id,
+                                   gtf_ref_df$gene_id)]
+novel_gtf_df[which(is.na(novel_gtf_df$gene_biotype)), "gene_biotype"] <- "stringtie"
+```
+
+```{r}
+## Check ref tx overlap 
+message(paste(Sys.time(), "Checking reference transcript overlap ..."),
+        sep = "\t")
+ref_overlap_txs <- suppressWarnings(check_tx_overlap(gtf = novel_gtf_df,
+                                    gtf_reference = gtf_reference))
+
+message(paste(Sys.time(), "Remove same sense i class transcripts ..."),
+        sep = "\t")
+same_strand_i_txs <- suppressWarnings(filter_i_class(gtf_df = novel_gtf_df,
+                                    reference_granges = gtf_reference))
+```
+
+```{r}
+novel_gtf_df <- subset(
+  novel_gtf_df, !(novel_gtf_df$transcript_id %in% ref_overlap_txs)
+)
+```
+
+```{r}
+gtf_novel_GR_out <-
+  GenomicRanges::makeGRangesFromDataFrame(novel_gtf_df, keep.extra.columns = T)
+```
+
+
+```{r}
+# Merge novel GTF with hg38 GTF
+gtf_novel_merged <- c(gtf_reference, gtf_novel_GR_out)
+```
+
+
+```{r}
+# Export GTF
+message(paste(Sys.time(), "Exporting custom gtf ... "), sep = "\t")
+rtracklayer::export.gff(object = gtf_novel_merged, con = paste0(workdir,"/analysis/customannotation/nbl_shortread_transcriptome_novel_filtered_new_new_len3.gtf"), format = "gtf")
+message(paste(Sys.time(), "Exporting custom gtf ... Done!"), sep = "\t")
+```
+
+
+
+
+
+
+
+
+
+

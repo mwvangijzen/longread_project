@@ -1,0 +1,822 @@
+---
+title: "qc check"
+author: "MG"
+output: html_document
+date: "2024-01-18"
+---
+
+# Setup
+```{r setup}
+workdir = "/hpc/pmc_vanheesch/projects/mvangijzen/nbl_longread"
+fastqdir = paste0(workdir, "/analysis/fastq_ingress_results")
+analysisdir = paste0(workdir, "/analysis")
+savedir = paste0(workdir, "/results/qc_stats")
+```
+
+# Libraries
+```{r libraries}
+library(magrittr)
+library(ggplot2)
+library(RColorBrewer)
+library(dplyr)
+library(ggpubr)
+```
+
+# Load data
+```{r assign file names}
+A13_read_stats_tsv = paste0(fastqdir, "/A13/fastcat_stats/per-read-stats.tsv")
+A14_read_stats_tsv = paste0(fastqdir, "/A14/fastcat_stats/per-read-stats.tsv")
+A15_read_stats_tsv = paste0(fastqdir, "/A15/fastcat_stats/per-read-stats.tsv")
+E02_read_stats_tsv = paste0(fastqdir, "/E02/fastcat_stats/per-read-stats.tsv")
+E03_read_stats_tsv = paste0(fastqdir, "/E03/fastcat_stats/per-read-stats.tsv")
+E05_read_stats_tsv = paste0(fastqdir, "/E05/fastcat_stats/per-read-stats.tsv")
+```
+
+```{r read files}
+# read length
+A13_read_length <- data.table::fread(file = A13_read_stats_tsv,
+                                     select=c(4:5))
+A14_read_length <- data.table::fread(file = A14_read_stats_tsv,
+                                     select=c(4:5))
+A15_read_length <- data.table::fread(file = A15_read_stats_tsv,
+                                     select=c(4:5))
+read_length_df <- rbind(A13_read_length,A14_read_length, A15_read_length)
+
+# read length entinostat
+E02_read_length <- data.table::fread(file = E02_read_stats_tsv,
+                                     select=c(4:5))
+E03_read_length <- data.table::fread(file = E03_read_stats_tsv,
+                                     select=c(4:5))
+E05_read_length <- data.table::fread(file = E05_read_stats_tsv,
+                                     select=c(4:5))
+E_read_length_df <- rbind(E02_read_length,E03_read_length, E05_read_length)
+
+# read length combined
+com_read_length_df <- rbind(A13_read_length,A14_read_length, A15_read_length,
+                            E02_read_length,E03_read_length, E05_read_length)
+
+# mean quality
+A13_mean_quality <- data.table::fread(file = A13_read_stats_tsv,
+                                     select=c(4,6))
+A14_mean_quality <- data.table::fread(file = A14_read_stats_tsv,
+                                     select=c(4,6))
+A15_mean_quality <- data.table::fread(file = A15_read_stats_tsv,
+                                     select=c(4,6))
+mean_quality_df <- rbind(A13_mean_quality,A14_mean_quality, A15_mean_quality)
+
+# mean quality entinostat
+E02_mean_quality <- data.table::fread(file = E02_read_stats_tsv,
+                                     select=c(4,6))
+E03_mean_quality <- data.table::fread(file = E03_read_stats_tsv,
+                                     select=c(4,6))
+E05_mean_quality <- data.table::fread(file = E05_read_stats_tsv,
+                                     select=c(4,6))
+E_mean_quality_df <- rbind(E02_mean_quality,E03_mean_quality, E05_mean_quality)
+
+# select both
+A13_stats <- data.table::fread(file = A13_read_stats_tsv,
+                                     select=c(4:6))
+A14_stats <- data.table::fread(file = A14_read_stats_tsv,
+                                     select=c(4:6))
+A15_stats <- data.table::fread(file = A15_read_stats_tsv,
+                                     select=c(4:6))
+
+```
+
+```{r load efficiently}
+#create filelist
+filelist <- list(A13_read_stats_tsv, A14_read_stats_tsv,
+                 A15_read_stats_tsv, E02_read_stats_tsv,
+                 E03_read_stats_tsv, E05_read_stats_tsv)
+#create read length df
+readlength_all <- data.frame()
+
+for (f in filelist){
+#create tmp df for individual sample
+tmp <- data.table::fread(file = f, select=c(4:6))
+#add tmp df to readlength_all df
+readlength_all <- rbind(readlength_all, tmp)
+rm(tmp)
+}
+```
+
+```{r add condition}
+readlength_all$condition <- ifelse(readlength_all$sample_name %in%
+                                   c("A13", "A14","A15"),
+                                   "control","entinostat")
+```
+
+# Remove outliers
+## Based on interquartile range
+```{r remove outliers example code}
+dim(readlength_all)
+## [1] 247990240         4
+
+quartiles <- quantile(readlength_all$read_length, probs=c(.25, .75), na.rm = FALSE)
+IQR <- IQR(readlength_all$read_length)
+ 
+Lower <- quartiles[1] - 1.5*IQR
+Upper <- quartiles[2] + 1.5*IQR 
+ 
+readlength_no_outlier <- subset(readlength_all, 
+                                readlength_all$read_length > Lower & 
+                                readlength_all$read_length < Upper)
+ 
+dim(readlength_no_outlier)
+## [1] 242467624         4
+```
+
+# Read Length
+## A13 remove outliers
+```{r remove outliers example code}
+dim(A13_read_length)
+## [1] 247990240         3
+
+quartiles <- quantile(A13_read_length$read_length, probs=c(.25, .75), na.rm = FALSE)
+IQR <- IQR(A13_read_length$read_length)
+ 
+Lower <- quartiles[1] - 1.5*IQR
+Upper <- quartiles[2] + 1.5*IQR 
+ 
+A13_read_length_rm_outliers <- subset(A13_read_length, 
+                                A13_read_length$read_length > Lower & 
+                                A13_read_length$read_length < Upper)
+ 
+dim(A13_read_length_rm_outliers)
+## [1] 242467624         3
+```
+
+## A13 read length distribution
+```{r}
+A13_readlength_mean <- mean(A13_read_length$read_length)
+
+A13length_plot <- A13_read_length %>%
+  ggplot(aes(read_length)) +
+    geom_histogram(binwidth = 20, fill = "darkcyan") +
+    coord_cartesian(xlim = c(0, 7500)) +
+    labs(x = "Read length (bp)", y = "Count") +
+    theme_classic() +
+    geom_vline(xintercept = mean(A13_read_length$read_length), 
+               color = "black", linetype = "dashed", linewidth = 0.6) +
+    scale_y_continuous(expand = c(0, 0)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    annotate("text", x = 4500, y = 500000, 
+             label = paste0("mean = ", format(round(A13_readlength_mean, 2), nsmall = 2))) +
+    annotate("text", x = 4500, y = 550000, 
+             label = paste0("n = ", length(A13_read_length$sample_name)))
+
+A13length_plot
+```
+
+## A13 save read length plot
+```{r save plot}
+ggsave(filename = "A13_readlength.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+## A14 remove outliers
+```{r remove outliers example code}
+dim(A14_read_length)
+## [1] 247990240         3
+
+quartiles <- quantile(A14_read_length$read_length, probs=c(.25, .75), na.rm = FALSE)
+IQR <- IQR(A14_read_length$read_length)
+ 
+Lower <- quartiles[1] - 1.5*IQR
+Upper <- quartiles[2] + 1.5*IQR 
+ 
+A14_read_length_rm_outliers <- subset(A14_read_length, 
+                                A14_read_length$read_length > Lower & 
+                                A14_read_length$read_length < Upper)
+ 
+dim(A14_read_length_rm_outliers)
+## [1] 242467624         3
+```
+
+## A14 read length distribution
+```{r}
+A14_readlength_mean <- mean(A14_read_length$read_length)
+
+A14length_plot <- A14_read_length %>%
+  ggplot(aes(read_length)) +
+    geom_histogram(binwidth = 20, fill = "darkcyan") +
+    coord_cartesian(xlim = c(0, 7500)) +
+    labs(x = "Read length (bp)", y = "Count") +
+    theme_classic() +
+    geom_vline(xintercept = mean(A14_read_length$read_length), 
+               color = "black", linetype = "dashed", linewidth = 0.6) +
+    scale_y_continuous(expand = c(0, 0)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    annotate("text", x = 4500, y = 500000, 
+             label = paste0("mean = ", format(round(A14_readlength_mean, 2), nsmall = 2))) +
+    annotate("text", x = 4500, y = 550000, 
+             label = paste0("n = ", length(A14_read_length$sample_name)))
+
+A14length_plot
+```
+
+## A14 save read length plot
+```{r save plot}
+ggsave(filename = "A14_readlength.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+## A15 remove outliers
+```{r remove outliers example code}
+dim(A15_read_length)
+## [1] 247990240         3
+
+quartiles <- quantile(A15_read_length$read_length, probs=c(.25, .75), na.rm = FALSE)
+IQR <- IQR(A15_read_length$read_length)
+ 
+Lower <- quartiles[1] - 1.5*IQR
+Upper <- quartiles[2] + 1.5*IQR 
+ 
+A15_read_length_rm_outliers <- subset(A15_read_length, 
+                                A15_read_length$read_length > Lower & 
+                                A15_read_length$read_length < Upper)
+ 
+dim(A15_read_length_rm_outliers)
+## [1] 242467624         3
+```
+
+## A15 read length distribution
+```{r}
+A15_readlength_mean <- mean(A15_read_length$read_length)
+
+A15length_plot <- A15_read_length %>%
+  ggplot(aes(read_length)) +
+    geom_histogram(binwidth = 20, fill = "darkcyan") +
+    coord_cartesian(xlim = c(0, 7500)) +
+    labs(x = "Read length (bp)", y = "Count") +
+    theme_classic() +
+    geom_vline(xintercept = mean(A15_read_length$read_length), 
+               color = "black", linetype = "dashed", linewidth = 0.6) +
+    scale_y_continuous(expand = c(0, 0)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    annotate("text", x = 4500, y = 500000, 
+             label = paste0("mean = ", format(round(A15_readlength_mean, 2), nsmall = 2))) +
+    annotate("text", x = 4500, y = 600000, 
+             label = paste0("n = ", length(A15_read_length$sample_name)))
+
+A15length_plot
+```
+
+## A15 save read length plot
+```{r save plot}
+ggsave(filename = "A15_readlength.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+## Compared read length distribution
+```{r}
+readlength_plot <- read_length_df %>%
+  ggplot(aes(sample_name, read_length)) +
+    geom_boxplot(fill="darkcyan") +
+    #coord_cartesian(ylim = c(0,6000)) +
+    labs(x="Sample", y="Read length (bp)") +
+    theme_classic() +
+    scale_y_continuous(expand = c(0, 0)) +
+    # scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+readlength_plot
+```
+
+## E02 read length distribution
+```{r}
+E02_readlength_mean <- mean(E02_read_length$read_length)
+
+E02length_plot <- E02_read_length %>%
+  ggplot(aes(read_length)) +
+    geom_histogram(binwidth = 20, fill = "darkcyan") +
+    coord_cartesian(xlim = c(0, 7500)) +
+    labs(x = "Read length (bp)", y = "Count") +
+    theme_classic() +
+    geom_vline(xintercept = mean(E02_read_length$read_length), 
+               color = "black", linetype = "dashed", linewidth = 0.6) +
+    scale_y_continuous(expand = c(0, 0)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    annotate("text", x = 4500, y = 400000, 
+             label = paste0("mean = ", format(round(E02_readlength_mean, 2), nsmall = 2))) +
+    annotate("text", x = 4500, y = 425000, 
+             label = paste0("n = ", length(E02_read_length$sample_name)))
+
+E02length_plot
+```
+
+## E02 save read length plot
+```{r save plot}
+ggsave(filename = "E02_readlength.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+## E03 read length distribution
+```{r}
+E03_readlength_mean <- mean(E03_read_length$read_length)
+
+E03length_plot <- E03_read_length %>%
+  ggplot(aes(read_length)) +
+    geom_histogram(binwidth = 20, fill = "darkcyan") +
+    coord_cartesian(xlim = c(0, 7500)) +
+    labs(x = "Read length (bp)", y = "Count") +
+    theme_classic() +
+    geom_vline(xintercept = mean(E03_read_length$read_length), 
+               color = "black", linetype = "dashed", linewidth = 0.6) +
+    scale_y_continuous(expand = c(0, 0)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    annotate("text", x = 4500, y = 400000, 
+             label = paste0("mean = ", format(round(E03_readlength_mean, 2), nsmall = 2))) +
+    annotate("text", x = 4500, y = 450000, 
+             label = paste0("n = ", length(E03_read_length$sample_name)))
+
+E03length_plot
+```
+
+## E03 save read length plot
+```{r save plot}
+ggsave(filename = "E03_readlength.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+## E05 read length distribution
+```{r}
+E05_readlength_mean <- mean(E05_read_length$read_length)
+
+E05length_plot <- E05_read_length %>%
+  ggplot(aes(read_length)) +
+    geom_histogram(binwidth = 20, fill = "darkcyan") +
+    coord_cartesian(xlim = c(0, 7500)) +
+    labs(x = "Read length (bp)", y = "Count") +
+    theme_classic() +
+    geom_vline(xintercept = mean(E05_read_length$read_length), 
+               color = "black", linetype = "dashed", linewidth = 0.6) +
+    scale_y_continuous(expand = c(0, 0)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    annotate("text", x = 4500, y = 400000, 
+             label = paste0("mean = ", format(round(E05_readlength_mean, 2), nsmall = 2))) +
+    annotate("text", x = 4500, y = 460000, 
+             label = paste0("n = ", length(E05_read_length$sample_name)))
+
+E05length_plot
+```
+
+## E05 save read length plot
+```{r save plot}
+ggsave(filename = "E05_readlength.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+## Entinostat compared read length distribution
+```{r}
+E_readlength_plot <- E_read_length_df %>%
+  ggplot(aes(sample_name, read_length)) +
+    geom_boxplot(fill="darkcyan") +
+    coord_cartesian(ylim = c(0,6000)) +
+    labs(x="Sample", y="Read length (bp)") +
+    theme_classic() +
+    scale_y_continuous(expand = c(0, 0)) +
+    # scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+E_readlength_plot
+```
+
+## Entinostat vs normal read length distribution
+```{r}
+all_readlength_plot <- readlength_no_outlier %>%
+  ggplot(aes(condition, read_length)) +
+    geom_boxplot(aes(colour = factor(condition))) +
+    #coord_cartesian(ylim = c(0,6000)) +
+    labs(y="Read length (bp)") +
+    scale_colour_manual(values = c("control" = "darkcyan",
+                                   "entinostat" = "darkorange2")) +
+    theme_classic() +
+  theme(legend.title = element_blank()) +
+    scale_y_continuous(expand = c(0, 0)) +
+    # scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          axis.title.x = element_blank())
+
+all_readlength_plot
+```
+
+# Mean Quality
+## A13 mean quality distribution
+```{r}
+A13_quality_mean <- mean(A13_mean_quality$mean_quality)
+
+A13quality_plot <- A13_mean_quality %>%
+  ggplot(aes(mean_quality)) +
+    geom_histogram(binwidth=0.1,fill="darkcyan") +
+    geom_density(alpha=0.6) +
+    coord_cartesian(xlim = c(0,30)) +
+    labs(x="Mean quality", y="Count") +
+    geom_vline(xintercept = A13_quality_mean, color = "black", 
+               linetype = "dashed", linewidth = 0.6) +
+    theme_classic() +
+    scale_y_continuous(expand = c(0, 0)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    annotate("text", x = 25, y = 400000, 
+             label = paste0("mean = ", format(round(A13_quality_mean, 2), nsmall = 2))) +
+    annotate("text", x = 25, y = 425000, 
+             label = paste0("n = ", length(A13_mean_quality$sample_name)))
+
+A13quality_plot
+```
+
+## A13 save mean quality plot
+```{r save plot}
+ggsave(filename = "A13_meanquality.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+## A14 mean quality distribution
+```{r}
+A14_quality_mean <- mean(A14_mean_quality$mean_quality)
+
+A14quality_plot <- A14_mean_quality %>%
+  ggplot(aes(mean_quality)) +
+    geom_histogram(binwidth=0.1,fill="darkcyan") +
+    geom_density(alpha=0.6) +
+    coord_cartesian(xlim = c(0,30)) +
+    labs(x="Mean quality", y="Count") +
+    geom_vline(xintercept = A14_quality_mean, color = "black", 
+               linetype = "dashed", linewidth = 0.6) +
+    theme_classic() +
+    scale_y_continuous(expand = c(0, 0)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    annotate("text", x = 25, y = 400000, 
+             label = paste0("mean = ", format(round(A14_quality_mean, 2), nsmall = 2))) +
+    annotate("text", x = 25, y = 425000, 
+             label = paste0("n = ", length(A14_mean_quality$sample_name)))
+
+A14quality_plot
+```
+
+## A14 save mean quality plot
+```{r save plot}
+ggsave(filename = "A14_meanquality.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+## A15 mean quality distribution
+```{r}
+A15_quality_mean <- mean(A15_mean_quality$mean_quality)
+
+A15quality_plot <- A15_mean_quality %>%
+  ggplot(aes(mean_quality)) +
+    geom_histogram(binwidth=0.1,fill="darkcyan") +
+    geom_density(alpha=0.6) +
+    coord_cartesian(xlim = c(0,30)) +
+    labs(x="Mean quality", y="Count") +
+    geom_vline(xintercept = A15_quality_mean, color = "black", 
+               linetype = "dashed", linewidth = 0.6) +
+    theme_classic() +
+    scale_y_continuous(expand = c(0, 0)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    annotate("text", x = 25, y = 400000, 
+             label = paste0("mean = ", format(round(A15_quality_mean, 2), nsmall = 2))) +
+    annotate("text", x = 25, y = 425000, 
+             label = paste0("n = ", length(A15_mean_quality$sample_name)))
+
+A15quality_plot
+```
+
+## A15 save mean quality plot
+```{r save plot}
+ggsave(filename = "A15_meanquality.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+## Compared quality distribution
+```{r}
+meanquality_plot <- mean_quality_df %>%
+  ggplot(aes(sample_name, mean_quality)) +
+    geom_boxplot(fill="darkcyan") +
+    coord_cartesian(ylim = c(7,22)) +
+    labs(x="Sample", y="Mean quality") +
+    theme_classic() +
+    scale_y_continuous(expand = c(0, 0)) +
+    # scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+meanquality_plot
+```
+
+## Untreated mean quality boxplot
+```{r save plot}
+ggsave(filename = "untreated_meanquality_boxplot_zoom.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+## E02 mean quality distribution
+```{r}
+E02quality_plot <- E02_mean_quality %>%
+  ggplot(aes(mean_quality)) +
+    geom_histogram(binwidth=0.2,fill="darkcyan") +
+    geom_density(alpha=0.6) +
+    coord_cartesian(xlim = c(0,30)) +
+    labs(x="Mean quality", y="Count",
+         title = "E02 mean quality distribution") +
+    geom_vline(xintercept = mean(E02_mean_quality$mean_quality), 
+                color="red", linetype="solid") +
+    geom_vline(xintercept = median(E02_mean_quality$mean_quality), 
+                color="black", linetype="dashed") +
+    theme_classic() +
+    scale_y_continuous(expand = c(0, 0)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+E02quality_plot
+```
+
+## E03 mean quality distribution
+```{r}
+E03quality_plot <- E03_mean_quality %>%
+  ggplot(aes(mean_quality)) +
+    geom_histogram(binwidth=0.2,fill="darkcyan") +
+    geom_density(alpha=0.6) +
+    coord_cartesian(xlim = c(0,30)) +
+    labs(x="Mean quality", y="Count",
+         title = "E03 mean quality distribution") +
+    geom_vline(xintercept = mean(E03_mean_quality$mean_quality), 
+                color="red", linetype="solid") +
+    geom_vline(xintercept = median(E03_mean_quality$mean_quality), 
+                color="black", linetype="dashed") +
+    theme_classic() +
+    scale_y_continuous(expand = c(0, 0)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+E03quality_plot
+```
+
+## E05 mean quality distribution
+```{r}
+E05quality_plot <- E05_mean_quality %>%
+  ggplot(aes(mean_quality)) +
+    geom_histogram(binwidth=0.2,fill="darkcyan") +
+    geom_density(alpha=0.6) +
+    coord_cartesian(xlim = c(0,30)) +
+    labs(x="Mean quality", y="Count",
+         title = "E05 mean quality distribution") +
+    geom_vline(xintercept = mean(E05_mean_quality$mean_quality), 
+                color="red", linetype="solid") +
+    geom_vline(xintercept = median(E05_mean_quality$mean_quality), 
+                color="black", linetype="dashed") +
+    theme_classic() +
+    scale_y_continuous(expand = c(0, 0)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+E05quality_plot
+```
+
+## Entinostat compared quality distribution
+```{r}
+E_meanquality_plot <- E_mean_quality_df %>%
+  ggplot(aes(sample_name, mean_quality)) +
+    geom_boxplot(fill="darkcyan") +
+    coord_cartesian(ylim = c(0,30)) +
+    labs(x="Sample", y="Mean quality") +
+    theme_classic() +
+    scale_y_continuous(expand = c(0, 0)) +
+    # scale_x_continuous(expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+E_meanquality_plot
+```
+
+# Mean quality per read length category
+minimum read length A13 = 11
+maximum read length A14 = 117238
+```{r divide read length in categories}
+A13_stats$length_category <- cut(A13_stats$read_length, 
+                                 breaks = c(-Inf, 500, 1000, 1500, 2000, Inf),
+                                 labels = c("[0-500]", "[500-1000]", "[1000-1500]", "[1500-2000]", "[2000<]"))
+```
+
+```{r plot mean quality per category}
+until500 <- subset(A13_stats, length_category=="[0-500]")
+until500_median <- median(until500$mean_quality)
+
+A13_quality_per_length <- A13_stats %>%
+  ggplot(aes(length_category, mean_quality)) +
+    geom_boxplot(fill="darkcyan") +
+    coord_cartesian(ylim = c(9,20)) +
+    labs(x="Length category", y="Mean quality") +
+    geom_abline(slope=0,intercept = until500_median, linetype="dashed") +
+    theme_classic() +
+    scale_y_continuous(expand = c(0, 0)) 
+    # scale_x_continuous(expand = c(0, 0)) +
+    #theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+A13_quality_per_length
+```
+
+## Saving 
+```{r save plot}
+ggsave(filename = "A13_quality_per_length_category_zoom.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+# Pychopper stats
+## Load pychopper files
+```{r load files}
+A13_pychop_stats_tsv = paste0(workdir, "/analysis/pychopper_stats/A13_pychopper.tsv")
+A14_pychop_stats_tsv = paste0(workdir, "/analysis/pychopper_stats/A14_pychopper.tsv")
+A15_pychop_stats_tsv = paste0(workdir, "/analysis/pychopper_stats/A15_pychopper.tsv")
+E02_pychop_stats_tsv = paste0(workdir, "/analysis/pychopper_stats/E02_pychopper.tsv")
+E03_pychop_stats_tsv = paste0(workdir, "/analysis/pychopper_stats/E03_pychopper.tsv")
+E05_pychop_stats_tsv = paste0(workdir, "/analysis/pychopper_stats/E05_pychopper.tsv")
+```
+
+```{r load efficiently}
+#create filelist
+filelist <- list(A13_pychop_stats_tsv, A14_pychop_stats_tsv,
+                 A15_pychop_stats_tsv, E02_pychop_stats_tsv,
+                 E03_pychop_stats_tsv, E05_pychop_stats_tsv)
+#create read length df
+pychop_stats <- data.frame()
+
+for (f in filelist){
+#create tmp df for individual sample
+tmp <- data.table::fread(file = f,
+                         nrows=10)
+#add tmp df to readlength_all df
+pychop_stats <- rbind(pychop_stats, tmp)
+rm(tmp)
+}
+
+# subset for classification
+pychop_class <- subset(pychop_stats, pychop_stats$Category == "Classification")
+
+pychop_class$Name <- factor(pychop_class$Name, levels=c("Unusable", 
+                                                        "Rescue",
+                                                        "Primers_found"))
+```
+
+## Plot stats
+```{r plot}
+plot_class <- ggplot(pychop_class, 
+                aes(fill=sample_id, Name, Value)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x="Classification", y="Number of reads") +
+  scale_fill_brewer(palette = "Dark2") +
+  #scale_fill_manual(values = c("darkgray", "orange", "royalblue",
+   #                            "red", "darkgreen", "black")) +
+  theme_classic() +
+  theme(legend.title = element_blank()) +
+  scale_y_continuous(expand = c(0, 0))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+plot_class
+```
+
+```{r plot}
+plot_class2 <- ggplot(pychop_class, 
+                aes(fill=Name, sample_id, Value)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x="Sample", y="Number of reads") +
+  scale_fill_brewer(palette = "Dark2") +
+  #geom_text(aes(label=Value), vjust=0, color="white", size=3.5)+
+  theme_classic() +
+  theme(legend.title = element_blank()) +
+  scale_y_continuous(expand = c(0, 0))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+plot_class2
+```
+
+```{r calculate percentage}
+pychop_total <- subset(pychop_stats, pychop_stats$Name == "PassReads", 
+                       select = c(3:4))
+
+pychop_total <- pychop_total %>% 
+  dplyr::rename(total = Value)
+
+pychop_perc <- merge(pychop_class, pychop_total, by = "sample_id")
+
+pychop_perc$percentage <- pychop_perc$Value / pychop_perc$total * 100
+```
+
+```{r plot percentage}
+plot_classperc <- ggplot(pychop_perc, 
+                aes(fill=Name, sample_id, percentage)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x="Sample", y="Percentage of reads") +
+  scale_fill_brewer(palette = "Dark2") +
+  geom_text(aes(label=round(percentage, digits = 1)),
+            vjust=-0.2, color="white", size=3.5)+
+  theme_classic() +
+  theme(legend.title = element_blank()) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1),
+                     expand = c(0, 0))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+plot_classperc
+```
+
+```{r combine plots}
+ggarrange(plot_class2, plot_classperc, 
+          common.legend = TRUE, 
+          legend = "bottom")
+```
+## Saving 
+```{r save plot}
+ggsave(filename = "pychop_classes_v2.pdf",
+       device = "pdf",
+       path = savedir,
+       width = 8,
+       height = 5
+       )
+```
+
+
+# Basic Stats per Sample
+## Load files
+```{r assign file names}
+A13_file_stats_tsv = paste0(fastqdir, "/A13/fastcat_stats/per-file-stats.tsv")
+A14_file_stats_tsv = paste0(fastqdir, "/A14/fastcat_stats/per-file-stats.tsv")
+A15_file_stats_tsv = paste0(fastqdir, "/A15/fastcat_stats/per-file-stats.tsv")
+E02_file_stats_tsv = paste0(fastqdir, "/E02/fastcat_stats/per-file-stats.tsv")
+E03_file_stats_tsv = paste0(fastqdir, "/E03/fastcat_stats/per-file-stats.tsv")
+E05_file_stats_tsv = paste0(fastqdir, "/E05/fastcat_stats/per-file-stats.tsv")
+```
+
+```{r read files}
+A13_file_stats <- data.table::fread(A13_file_stats_tsv, select = c(2:7))
+A14_file_stats <- data.table::fread(A14_file_stats_tsv, select = c(2:7))
+A15_file_stats <- data.table::fread(A15_file_stats_tsv, select = c(2:7))
+E02_file_stats <- data.table::fread(E02_file_stats_tsv, select = c(2:7))
+E03_file_stats <- data.table::fread(E03_file_stats_tsv, select = c(2:7))
+E05_file_stats <- data.table::fread(E05_file_stats_tsv, select = c(2:7))
+
+all_file_stats <- rbind(A13_file_stats, A14_file_stats, A15_file_stats,
+                        E02_file_stats, E03_file_stats, E05_file_stats)
+
+all_file_stats %>%
+  rename(
+    n_reads = n_seqs
+  )
+```
+
+```{r create table}
+#save table
+qcres_dir = "/hpc/pmc_vanheesch/projects/mvangijzen/nbl_longread/results/qc_stats"
+write.csv(all_file_stats, file = paste0(qcres_dir,"/per_sample_stats.csv"), sep = "")
+```

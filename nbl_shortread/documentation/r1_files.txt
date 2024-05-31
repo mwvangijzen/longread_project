@@ -1,0 +1,11 @@
+/hpc/pmc_vanheesch/data/maxima/rnaseq/OE0290_organoids_AMC691B/AS-524356-LR-53225_R1.fastq.gz
+/hpc/pmc_vanheesch/data/vanheesch_sequencing/rnaseq/genewiz_90-537137854/SVH02-50_R1_001.fastq.gz
+/hpc/pmc_vanheesch/data/vanheesch_sequencing/rnaseq/genewiz_90-537137854/SVH02-51_R1_001.fastq.gz
+/hpc/pmc_vanheesch/data/vanheesch_sequencing/rnaseq/genewiz_90-537137854/SVH02-52_R1_001.fastq.gz
+/hpc/pmc_vanheesch/data/vanheesch_sequencing/rnaseq/genewiz_90-537137854/SVH02-53_R1_001.fastq.gz
+/hpc/pmc_vanheesch/data/vanheesch_sequencing/rnaseq/genewiz_90-537137854/SVH02-54_R1_001.fastq.gz
+/hpc/pmc_vanheesch/data/vanheesch_sequencing/rnaseq/genewiz_90-537137854/SVH02-60_R1_001.fastq.gz
+/hpc/pmc_vanheesch/data/vanheesch_sequencing/rnaseq/genewiz_90-537137854/SVH02-61_R1_001.fastq.gz
+/hpc/pmc_vanheesch/data/vanheesch_sequencing/rnaseq/genewiz_90-537137854/SVH02-62_R1_001.fastq.gz
+/hpc/pmc_vanheesch/data/vanheesch_sequencing/rnaseq/genewiz_90-537137854/SVH02-63_R1_001.fastq.gz
+/hpc/pmc_vanheesch/data/vanheesch_sequencing/rnaseq/genewiz_90-537137854/SVH02-64_R1_001.fastq.gz
