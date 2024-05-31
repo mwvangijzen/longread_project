@@ -22,14 +22,6 @@ library(EnhancedVolcano)
 library(dplyr)
 library(ggbeeswarm)
 library(ComplexHeatmap)
-
-# which ones are actually necessary?
-library(rtracklayer)
-library(magrittr)
-library(RColorBrewer)
-library(viridis)
-library(ggpubr)
-library(tidyverse)
 ```
 
 # Loading salmon counts
@@ -110,17 +102,6 @@ summary(sr_res)
 sum(sr_res$padj < 0.05, na.rm=TRUE)
 ```
 
-out of 26924 with nonzero total read count
-adjusted p-value < 0.1
-LFC > 0 (up)       : 9693, 36%
-LFC < 0 (down)     : 6429, 24%
-outliers [1]       : 746, 2.8%
-low counts [2]     : 0, 0%
-(mean count < 0)
-[1] see 'cooksCutoff' argument of ?results
-[2] see 'independentFiltering' argument of ?results
-
-
 ```{r}
 #shrinkage of effect size for visualization
 sr_resLFC <- lfcShrink(sr_dds_not0, coef="condition_entinostat_vs_untreated", 
@@ -152,15 +133,9 @@ sr_mycn_counts <- as.data.frame(plotCounts(sr_dds_not0, gene="ENSG00000134323",
  ggplot(sr_mycn_counts, aes(condition, count)) +
   geom_beeswarm(size = 2, cex = 0.8, alpha = 1) +
   labs(x="Condition", y="Normalized counts", ylim = c(0,90000)) +
-  #scale_colour_manual(values = c("untreated"="#437ABE",
-                                 #"entinostat"="#932B2B")) +
   theme_classic() +
   scale_y_continuous(limits = c(0, 120000)) +
   theme(legend.title = element_blank())
-  #scale_x_discrete(labels = c("untreated", "entinostat")) #+
-  # stat_summary(aes(group = 1, yend = after_stat(y), xend = after_stat(x+0.1)),
-  #               color = "black", fun = mean, geom = "segment",
-  #               position = "identity")
  
  ggsave(filename = "beeswarm_sr_mycn_count.pdf", device = "pdf",
        path = savedir, width = 8, height = 5)
@@ -178,8 +153,6 @@ ggplot(sr_pca_data, aes(PC1, PC2, color=condition)) +
   xlab(paste0("PC1: ",sr_pct_var[1],"% variance")) +
   ylab(paste0("PC2: ",sr_pct_var[2],"% variance")) +
   theme_classic() +
-  #geom_text(hjust=0.4, vjust=-1, size=2.7, show.legend = F) +
-  #geom_label(show.legend = FALSE) +
   coord_fixed()
 ```
 ```{r save plot}
@@ -244,16 +217,6 @@ sr_keyvals <- data.frame(sr_resLFC_df) %>%
 sr_keyvals$color <- ifelse(sr_keyvals$gene_type == "novel", novel_gene_color,
                    ifelse(sr_keyvals$gene_type == "protein_coding", protein_coding_gene_color,
                    ifelse(sr_keyvals$gene_type == "lncRNA", lncrna_gene_color, NA)))
-
-# Subset keyvals where padj is 0.05 or higher
-#subset_keyvals <- keyvals[keyvals$padj >= 0.05, ]
-
-# Reassign color for the subset
-#subset_keyvals$color <- "lightgray"
-#keyvals[keyvals$padj >= 0.05, ]$color <- subset_keyvals$color
-
-# sanity check
-# table(keyvals$color)
 
 # Update the names for the legend
 sr_keyvals$name <- ifelse(sr_keyvals$gene_type == "novel", "Novel",
@@ -338,7 +301,6 @@ column annotation
 ```{r create column annotation}
 # initiate colors
 cond_cols <- c("#932B2B", "#437ABE")
-#tumor_col <- "#78A245"   #plotting only one tumor type so not useful
 
 # create column annotation metadata
 sr_annot_col <- as.data.frame(sr_metadata[, "condition"])
@@ -676,42 +638,7 @@ lr_alldown <- read.csv(paste0(savedir,"/lr_alldown.csv"))
 lr_allup <- read.csv(paste0(savedir,"/lr_allup.csv"))
 ```
 
-
-## Venn diagram for overlap
-```{r venn setup}
-# Load library
-library(VennDiagram)
- 
-# Filter out annotated genes
-sr_annotated_down <- sr_alldown %>% filter(gene_type!="novel") %>% select(c(gene_id, gene_type))
-lr_annotated_down <- lr_alldown %>% filter(gene_type!="novel") %>% select(c(gene_id, gene_type))
-
-# Prepare a palette of 2 colors with R colorbrewer:
-colors_venn <- c("darkred", "darkcyan", "#06948E", "#4DB3B3", "#04665E")
-
-# ggVennDiagram
-library(ggVennDiagram)
-
-ggVennDiagram(list(sr_annotated_down$gene_id, lr_annotated_down$gene_id),
-              category.names = c("short-read", "long-read"),
-              set_color = c("darkred", "darkcyan"),
-              force_upset = T,
-              theme_classic())
-
-# UpSetR
-library(UpSetR)
-
-UpSetR::upset(fromList(list(short_read_down = sr_annotated_down$gene_id,
-                            long_read_down = lr_annotated_down$gene_id)),
-              order.by = "freq",
-              main.bar.color = "darkgreen")
-
-UpSetR::upset()
-
-# UpSetPlot --> not available in this version of R
-```
-
-## upset attempt 2
+## Upset plot for overlap between long-read and short-read de genes
 ```{r upset}
 sr_proteincod_down <- sr_alldown %>% filter(gene_type=="protein_coding") %>% select(gene_id)
 lr_proteincod_down <- lr_alldown %>% filter(gene_type=="protein_coding") %>% select(gene_id)
